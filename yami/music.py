@@ -15,6 +15,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw
 import spotdl
 import pygame
+import numpy as np
 
 
 from .topbar import TopBar
@@ -23,6 +24,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .spectrum import SpectrumFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -94,6 +96,28 @@ class MusicPlayer(ctk.CTk):
         
         self.current_song_index = index
         song_path = self.playlist[index]
+        
+        # 加载完整音频数据用于FFT分析
+        self.audio_data = None
+        self.use_fallback_visual = True  # 默认使用fallback视觉效果
+        try:
+            # 使用pygame加载完整音频数据
+            sound = pygame.mixer.Sound(song_path)
+            raw_data = pygame.sndarray.array(sound)
+            # 转换为单声道
+            if raw_data.ndim == 2:
+                self.audio_data = np.mean(raw_data, axis=1).astype(np.float32)
+            else:
+                self.audio_data = raw_data.astype(np.float32)
+            # 归一化到[-1, 1]范围
+            self.audio_data /= np.max(np.abs(self.audio_data)) if np.max(np.abs(self.audio_data)) != 0 else 1
+            self.audio_sampling_rate = sound.get_frequency()
+            
+            # 检查是否有有效音频数据
+            if self.audio_data is not None and len(self.audio_data) > 0 and np.max(np.abs(self.audio_data)) > 0:
+                self.use_fallback_visual = False
+        except Exception as e:
+            logging.debug("Failed to load audio data for FFT: %s", e)
         
         try:
             # 获取歌曲长度
@@ -295,7 +319,13 @@ class MusicPlayer(ctk.CTk):
 
     def initialize_pygame(self):
         """Initialize pygame mixer for audio playback"""
-        pygame.mixer.init()
+        # 初始化音频设置，支持音频数组获取
+        pygame.mixer.init(
+            frequency=44100,
+            size=-16,  # 16位有符号
+            channels=2,
+            buffer=4096
+        )
         logging.debug("initialized pygame mixer")
 
     def setup_icons(self):
@@ -313,6 +343,7 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame = PlaylistFrame(self)
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
+        self.spectrum_frame = SpectrumFrame(self)
         self.lyrics_frame = LyricsFrame(self)
 
     def setup_keybindings(self):
@@ -331,11 +362,12 @@ class MusicPlayer(ctk.CTk):
 
     def setup_widget_packing(self):
         self.topbar.pack(side=tk.TOP, fill=tk.X)
-        self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.spectrum_frame.pack(side=tk.BOTTOM, fill="x", padx=10, pady=(0, 10))
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=(10, 0))
         logging.debug("widgets packed")
 
     def update_loop(self):
