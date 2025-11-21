@@ -15,7 +15,6 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw
 import spotdl
 import pygame
-import numpy as np
 
 
 from .topbar import TopBar
@@ -24,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .spectrum import SpectrumFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -50,6 +48,10 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
+        self.crossfade_duration = 5  # 默认交叉淡入淡出时长为5秒
+        self.crossfade_enabled = True  # 是否启用交叉淡入淡出
+        self.is_fading = False  # 是否正在进行淡入淡出
+        self.fade_task = None  # 淡入淡出任务
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -61,6 +63,12 @@ class MusicPlayer(ctk.CTk):
         # 歌词相关
         self.lyrics = []  # 存储歌词和时间戳的列表 [(time, lyric), ...]
         self.current_lyric_index = -1  # 当前显示的歌词索引
+
+        # 音频通道管理
+        self.channels = []  # 存储所有可用通道
+        self.current_channel = None  # 当前播放通道
+        self.next_channel = None  # 下一首播放通道
+        self.max_channels = 2  # 最多使用2个通道进行交叉淡入淡出
 
         self.initialize_pygame()
 
@@ -75,9 +83,15 @@ class MusicPlayer(ctk.CTk):
         self.after(EVENT_INTERVAL, self.update)
 
     def update(self, event=None):
-        if self.is_playing:
+        if self.is_playing and not self.is_fading:
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
+            remaining_time = self.song_length - (current_time - self.song_start_time)
+            
+            # 检查是否需要开始交叉淡入淡出
+            if self.crossfade_enabled and remaining_time <= self.crossfade_duration and remaining_time > 0:
+                self.start_crossfade()
+            
             if song_position >= 1.0:
                 self.play_next_song()
             else:
@@ -90,34 +104,14 @@ class MusicPlayer(ctk.CTk):
                 self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
-    def load_and_play_song(self, index):
-        if self.is_playing:
-            pygame.mixer.music.stop()
+    def load_and_play_song(self, index, fade_in=False):
+        # 停止当前所有通道
+        for channel in self.channels:
+            if channel.get_busy():
+                channel.stop()
         
         self.current_song_index = index
         song_path = self.playlist[index]
-        
-        # 加载完整音频数据用于FFT分析
-        self.audio_data = None
-        self.use_fallback_visual = True  # 默认使用fallback视觉效果
-        try:
-            # 使用pygame加载完整音频数据
-            sound = pygame.mixer.Sound(song_path)
-            raw_data = pygame.sndarray.array(sound)
-            # 转换为单声道
-            if raw_data.ndim == 2:
-                self.audio_data = np.mean(raw_data, axis=1).astype(np.float32)
-            else:
-                self.audio_data = raw_data.astype(np.float32)
-            # 归一化到[-1, 1]范围
-            self.audio_data /= np.max(np.abs(self.audio_data)) if np.max(np.abs(self.audio_data)) != 0 else 1
-            self.audio_sampling_rate = sound.get_frequency()
-            
-            # 检查是否有有效音频数据
-            if self.audio_data is not None and len(self.audio_data) > 0 and np.max(np.abs(self.audio_data)) > 0:
-                self.use_fallback_visual = False
-        except Exception as e:
-            logging.debug("Failed to load audio data for FFT: %s", e)
         
         try:
             # 获取歌曲长度
@@ -127,10 +121,35 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            pygame.mixer.music.load(song_path)
-            pygame.mixer.music.play()
+            # 加载音频到Sound对象
+            sound = pygame.mixer.Sound(song_path)
+            
+            # 获取可用通道
+            if len(self.channels) < self.max_channels:
+                channel = pygame.mixer.Channel(len(self.channels))
+                self.channels.append(channel)
+            else:
+                # 重用最早的通道
+                channel = self.channels.pop(0)
+                self.channels.append(channel)
+            
+            self.current_channel = channel
+            
+            # 设置初始音量
+            if fade_in:
+                channel.set_volume(0.0)
+            else:
+                channel.set_volume(1.0)
+            
+            # 播放音频
+            channel.play(sound)
             self.is_playing = True
             self.song_start_time = time.time()
+            self.is_fading = False
+            
+            # 如果需要淡入，启动淡入任务
+            if fade_in:
+                self.start_fade_in()
             
             # CHANGE INFO
             self.change_info()
@@ -144,6 +163,23 @@ class MusicPlayer(ctk.CTk):
             logging.exception(e)
 
     def change_info(self, event=None):
+        """更新当前歌曲信息"""
+        if not self.playlist or self.current_song_index >= len(self.playlist):
+            return
+            
+        song_path = self.playlist[self.current_song_index]
+        self.change_info_with_path(song_path)
+    
+    def change_info_for_next_song(self, next_index):
+        """更新下一首歌曲的信息（用于交叉淡入淡出）"""
+        if not self.playlist or next_index >= len(self.playlist):
+            return
+            
+        song_path = self.playlist[next_index]
+        self.change_info_with_path(song_path)
+    
+    def change_info_with_path(self, song_path):
+        """根据歌曲路径更新歌曲信息"""
         logging.debug("changing art,name of this song")
 
         self.cover_art_frame.cover_art_label.configure(
@@ -158,9 +194,9 @@ class MusicPlayer(ctk.CTk):
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
         if self.current_song_index < len(self.playlist) - 1:
-            self.load_and_play_song(self.current_song_index + 1)
+            self.load_and_play_song(self.current_song_index + 1, fade_in=True)
         else:
-            self.load_and_play_song(0)  # 循环播放
+            self.load_and_play_song(0, fade_in=True)  # 循环播放
         
         # UPDATE SELECTION
         self.playlist_frame.song_list.selection_clear(0, tk.END)
@@ -169,9 +205,9 @@ class MusicPlayer(ctk.CTk):
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
         if self.current_song_index > 0:
-            self.load_and_play_song(self.current_song_index - 1)
+            self.load_and_play_song(self.current_song_index - 1, fade_in=True)
         else:
-            self.load_and_play_song(len(self.playlist) - 1)  # 循环播放
+            self.load_and_play_song(len(self.playlist) - 1, fade_in=True)  # 循环播放
         
         # UPDATE SELECTION
         self.playlist_frame.song_list.selection_clear(0, tk.END)
@@ -277,12 +313,28 @@ class MusicPlayer(ctk.CTk):
         return lyrics
     
     def load_lyrics(self):
-        """加载当前歌曲的歌词文件"""
+        """加载当前歌曲的歌词"""
         if not self.playlist or self.current_song_index >= len(self.playlist):
             self.lyrics = []
             return
             
         song_path = self.playlist[self.current_song_index]
+        self.load_lyrics_with_path(song_path)
+    
+    def load_lyrics_for_next_song(self, next_index):
+        """加载下一首歌曲的歌词（用于交叉淡入淡出）"""
+        if not self.playlist or next_index >= len(self.playlist):
+            self.lyrics = []
+            return
+            
+        song_path = self.playlist[next_index]
+        self.load_lyrics_with_path(song_path)
+    
+    def load_lyrics_with_path(self, song_path):
+        """根据歌曲路径加载歌词"""
+        if not song_path:
+            self.lyrics = []
+            return
         lrc_path = Path(song_path).with_suffix('.lrc')
         
         try:
@@ -319,14 +371,10 @@ class MusicPlayer(ctk.CTk):
 
     def initialize_pygame(self):
         """Initialize pygame mixer for audio playback"""
-        # 初始化音频设置，支持音频数组获取
-        pygame.mixer.init(
-            frequency=44100,
-            size=-16,  # 16位有符号
-            channels=2,
-            buffer=4096
-        )
-        logging.debug("initialized pygame mixer")
+        pygame.mixer.init()
+        # 初始化通道列表
+        self.channels = [pygame.mixer.Channel(i) for i in range(self.max_channels)]
+        logging.debug("initialized pygame mixer with %d channels", self.max_channels)
 
     def setup_icons(self):
         self.play_icon = ctk.CTkImage(Image.open("yami/data/play_arrow.png"))
@@ -343,7 +391,6 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame = PlaylistFrame(self)
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
-        self.spectrum_frame = SpectrumFrame(self)
         self.lyrics_frame = LyricsFrame(self)
 
     def setup_keybindings(self):
@@ -362,14 +409,140 @@ class MusicPlayer(ctk.CTk):
 
     def setup_widget_packing(self):
         self.topbar.pack(side=tk.TOP, fill=tk.X)
-        self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        self.spectrum_frame.pack(side=tk.BOTTOM, fill="x", padx=10, pady=(0, 10))
+        self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=(10, 0))
+        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
 
+    def start_crossfade(self):
+        """开始交叉淡入淡出"""
+        if self.is_fading or not self.crossfade_enabled:
+            return
+            
+        self.is_fading = True
+        logging.debug("Starting crossfade")
+        
+        # 计算下一首歌曲的索引
+        next_index = self.current_song_index + 1
+        if next_index >= len(self.playlist):
+            next_index = 0
+        
+        # 提前更新歌曲信息和歌词（解决滞后问题）
+        self.temp_next_index = next_index
+        self.change_info_for_next_song(next_index)
+        self.load_lyrics_for_next_song(next_index)
+        
+        # 加载下一首歌曲到新通道
+        song_path = self.playlist[next_index]
+        try:
+            sound = pygame.mixer.Sound(song_path)
+            
+            # 获取可用通道
+            if len(self.channels) < self.max_channels:
+                self.next_channel = pygame.mixer.Channel(len(self.channels))
+                self.channels.append(self.next_channel)
+            else:
+                # 重用最早的通道
+                self.next_channel = self.channels.pop(0)
+                self.channels.append(self.next_channel)
+            
+            # 设置下一首歌曲的初始音量为0
+            self.next_channel.set_volume(0.0)
+            self.next_channel.play(sound)
+            
+            # 启动淡入淡出任务
+            self.fade_task = self.after(0, self.fade_update, 0)
+            
+        except Exception as e:
+            logging.exception("Failed to start crossfade: %s", e)
+            self.is_fading = False
+    
+    def fade_update(self, elapsed):
+        """更新淡入淡出效果"""
+        if not self.is_fading:
+            return
+            
+        # 计算音量变化
+        progress = elapsed / self.crossfade_duration
+        
+        if self.current_channel and self.current_channel.get_busy():
+            # 当前歌曲音量递减
+            current_volume = 1.0 - progress
+            self.current_channel.set_volume(max(current_volume, 0.0))
+        
+        if self.next_channel and self.next_channel.get_busy():
+            # 下一首歌曲音量递增
+            next_volume = progress
+            self.next_channel.set_volume(min(next_volume, 1.0))
+        
+        # 检查是否完成淡入淡出
+        if elapsed < self.crossfade_duration:
+            # 继续淡入淡出
+            self.fade_task = self.after(EVENT_INTERVAL, self.fade_update, elapsed + EVENT_INTERVAL / 1000)
+        else:
+            # 完成淡入淡出
+            self.complete_crossfade()
+    
+    def complete_crossfade(self):
+        """完成交叉淡入淡出"""
+        # 停止当前通道
+        if self.current_channel and self.current_channel.get_busy():
+            self.current_channel.stop()
+            
+        # 更新当前歌曲索引
+        self.current_song_index = self.temp_next_index
+        self.current_channel = self.next_channel
+        self.next_channel = None
+        
+        # 更新播放列表选择
+        self.playlist_frame.song_list.selection_clear(0, tk.END)
+        self.playlist_frame.song_list.select_set(self.current_song_index)
+        
+        # 重置状态
+        self.is_fading = False
+        self.song_start_time = time.time()
+        del self.temp_next_index
+        logging.debug("Crossfade completed")
+    
+    def start_fade_in(self):
+        """开始淡入效果"""
+        if not self.current_channel:
+            return
+            
+        self.is_fading = True
+        self.fade_task = self.after(0, self.fade_in_update, 0)
+    
+    def fade_in_update(self, elapsed):
+        """更新淡入效果"""
+        if not self.is_fading or not self.current_channel:
+            return
+            
+        # 计算音量变化
+        progress = elapsed / self.crossfade_duration
+        volume = min(progress, 1.0)
+        self.current_channel.set_volume(volume)
+        
+        # 检查是否完成淡入
+        if elapsed < self.crossfade_duration:
+            # 继续淡入
+            self.fade_task = self.after(EVENT_INTERVAL, self.fade_in_update, elapsed + EVENT_INTERVAL / 1000)
+        else:
+            # 完成淡入
+            self.is_fading = False
+            logging.debug("Fade in completed")
+    
+    def set_crossfade_duration(self, duration):
+        """设置交叉淡入淡出时长"""
+        self.crossfade_duration = max(0, min(10, duration))  # 限制在0-10秒之间
+        logging.debug("Crossfade duration set to %d seconds", self.crossfade_duration)
+    
+    def toggle_crossfade(self):
+        """切换交叉淡入淡出功能"""
+        self.crossfade_enabled = not self.crossfade_enabled
+        logging.debug("Crossfade %s", "enabled" if self.crossfade_enabled else "disabled")
+    
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
