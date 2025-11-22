@@ -9,8 +9,11 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 
 def entry():
-    app = MusicPlayer()
-    app.mainloop()
+    try:
+        app = MusicPlayer()
+        app.mainloop()
+    except Exception as e:
+        logging.exception(e)
 
 
 if __name__ == "__main__":
