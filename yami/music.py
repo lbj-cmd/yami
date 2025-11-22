@@ -23,6 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .lyric_editor import LyricEditorFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -59,6 +60,7 @@ class MusicPlayer(ctk.CTk):
         # 歌词相关
         self.lyrics = []  # 存储歌词和时间戳的列表 [(time, lyric), ...]
         self.current_lyric_index = -1  # 当前显示的歌词索引
+        self.is_editor_mode = False  # 是否处于歌词编辑模式
 
         self.initialize_pygame()
 
@@ -79,41 +81,25 @@ class MusicPlayer(ctk.CTk):
             if song_position >= 1.0:
                 self.play_next_song()
             else:
-                # Update waveform progress
-                self.bottom_frame.update_progress()
+                self.bottom_frame.progress_bar.set(song_position)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
                 # 更新歌词显示
-                current_play_time = (current_time - self.song_start_time)
-                self.lyrics_frame.update_lyrics(current_play_time)
+                if not self.is_editor_mode:
+                    current_play_time = (current_time - self.song_start_time)
+                    self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
-    
-    def seek(self, time_position):
-        """Seek to a specific time position in the current song"""
-        if self.is_playing:
-            pygame.mixer.music.stop()
-            
-        # Calculate new start time
-        self.song_start_time = time.time() - time_position
-        
-        # Set the music position
-        pygame.mixer.music.load(self.playlist[self.current_song_index])
-        pygame.mixer.music.play(start=time_position)
-        
-        self.is_playing = True
-        
-        # Update UI
-        self.control_bar.play_button.configure(image=self.pause_icon)
-        self.bottom_frame.update_progress()
-    
-    def get_current_time(self):
-        """Get current playback time"""
-        if self.is_playing:
-            return time.time() - self.song_start_time
-        return 0
 
     def load_and_play_song(self, index):
+        if not self.playlist:
+            logging.debug("Playlist is empty, cannot load and play song")
+            return
+        # 索引边界检查
+        if index < 0 or index >= len(self.playlist):
+            logging.debug(f"Invalid song index: {index}, using 0 instead")
+            index = 0
+        
         if self.is_playing:
             pygame.mixer.music.stop()
         
@@ -140,9 +126,6 @@ class MusicPlayer(ctk.CTk):
             self.load_lyrics()
             self.current_lyric_index = -1
             
-            # 初始化波形进度条
-            self.bottom_frame.start_progress_bar(self.song_length)
-            
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
             logging.exception(e)
@@ -161,6 +144,9 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
+        if not self.playlist:
+            logging.debug("Playlist is empty, cannot play next song")
+            return
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
@@ -172,6 +158,9 @@ class MusicPlayer(ctk.CTk):
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
+        if not self.playlist:
+            logging.debug("Playlist is empty, cannot play previous song")
+            return
         if self.current_song_index > 0:
             self.load_and_play_song(self.current_song_index - 1)
         else:
@@ -303,6 +292,62 @@ class MusicPlayer(ctk.CTk):
         except Exception as e:
             self.lyrics = []
             logging.exception("Failed to load lyrics: %s", e)
+    
+    def toggle_lyric_editor(self, event=None):
+        """切换歌词编辑器模式"""
+        if self.is_editor_mode:
+            # 退出编辑模式，恢复原布局
+            self.is_editor_mode = False
+            self.lyric_editor_frame.pack_forget()
+            
+            # 恢复原有的三栏布局
+            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
+            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            self.playlist_frame.pack(side=tk.RIGHT)
+            
+            logging.debug("Exited lyric editor mode")
+        else:
+            # 进入编辑模式，隐藏原布局
+            self.is_editor_mode = True
+            self.cover_art_frame.pack_forget()
+            self.lyrics_frame.pack_forget()
+            self.playlist_frame.pack_forget()
+            
+            # 显示编辑器
+            self.lyric_editor_frame.pack(expand=True, fill="both", padx=10, pady=10)
+            
+            # 如果有歌词，加载到编辑器
+            if self.lyrics:
+                self.lyric_editor_frame.lyrics = self.lyrics.copy()
+                self.lyric_editor_frame.current_line_index = 0
+                self.lyric_editor_frame.update_preview()
+            
+            logging.debug("Entered lyric editor mode")
+    
+    def handle_down_key(self, event=None):
+        """处理Down键事件"""
+        if self.is_editor_mode:
+            self.lyric_editor_frame.add_timestamp()
+    
+    def seek_to(self, timestamp):
+        """跳转到指定时间点"""
+        if not self.playlist:
+            return
+            
+        try:
+            pygame.mixer.music.set_pos(timestamp)
+            self.song_start_time = time.time() - timestamp
+            
+            # 更新进度条
+            if self.song_length > 0:
+                self.bottom_frame.progress_bar.set(timestamp / self.song_length)
+                self.control_bar.playback_label.configure(
+                    text=make_time_string(int(timestamp), self.song_length)
+                )
+            
+            logging.debug("Seek to %.2f seconds", timestamp)
+        except Exception as e:
+            logging.exception("Failed to seek: %s", e)
 
     def get_song_position(self) -> float:
         if self.is_playing:
@@ -342,12 +387,16 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
+        self.lyric_editor_frame = LyricEditorFrame(self)
+        self.lyric_editor_frame.pack_forget()  # 初始隐藏编辑器
 
     def setup_keybindings(self):
         """
         :param `<F9>`: play next
         :param `<F8>`: play previous
         :param `<Space>`:  play or pause
+        :param `<F7>`: toggle lyric editor mode
+        :param `<Down>`: add timestamp in editor mode
         """
 
         self.bind("<F10>", self.play_next_song)
@@ -355,6 +404,8 @@ class MusicPlayer(ctk.CTk):
         self.bind("<F9>", self.control_bar.play_pause)
         self.bind("<space>", self.control_bar.play_pause)
         self.bind("<Control-o>", self.topbar.choose_folder)
+        self.bind("<F7>", self.toggle_lyric_editor)
+        self.bind("<Down>", self.handle_down_key)
         logging.debug("setup keybinds")
 
     def setup_widget_packing(self):
