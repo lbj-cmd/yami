@@ -60,7 +60,19 @@ class ControlBar(ctk.CTkFrame):
             text_color="#e0e0e0",
         )
         self.playback_label = ctk.CTkLabel(
-            self, text="0:00 / 0:00", font=("roboto", 12), fg_color="#121212"
+            self,
+            text="0:00 / 0:00",
+            font=("roboto", 12),
+            fg_color="#121212"
+        )
+        
+        # 循环模式开关
+        self.loop_switch = ctk.CTkSwitch(
+            self,
+            text="循环模式",
+            font=("roboto", 12),
+            fg_color="#121212",
+            command=self.toggle_loop_mode
         )
 
         # PLACEMENT
@@ -69,6 +81,7 @@ class ControlBar(ctk.CTkFrame):
         self.grid_columnconfigure(2, weight=0)
         self.grid_columnconfigure(3, weight=0)
         self.grid_columnconfigure(4, weight=0)
+        self.grid_columnconfigure(5, weight=0)
 
         # PLACEMENT
         self.music_title_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
@@ -76,6 +89,7 @@ class ControlBar(ctk.CTkFrame):
         self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
         self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
         self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
+        self.loop_switch.grid(row=0, column=5, sticky="e", padx=5, pady=10)
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
@@ -90,6 +104,29 @@ class ControlBar(ctk.CTkFrame):
             self.parent.is_playing = True
             logging.debug("resumed")
         self.update_play_button()
+
+    def toggle_loop_mode(self):
+        """Toggle loop mode and switch between lyrics and loop editor"""
+        self.parent.loop_mode = self.loop_switch.get()
+        
+        if self.parent.loop_mode:
+            # 隐藏歌词面板，显示循环编辑器
+            self.parent.lyrics_frame.pack_forget()
+            if not hasattr(self.parent, 'loop_editor'):
+                from .loop_editor import LoopEditorFrame
+                self.parent.loop_editor = LoopEditorFrame(self.parent)
+            self.parent.loop_editor.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            # 初始化循环区间为整个歌曲
+            self.parent.loop_start = 0.0
+            self.parent.loop_end = self.parent.song_length
+            self.parent.loop_editor.update_loop_region()
+        else:
+            # 隐藏循环编辑器，显示歌词面板
+            if hasattr(self.parent, 'loop_editor'):
+                self.parent.loop_editor.pack_forget()
+            self.parent.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+        
+        logging.debug(f"loop mode toggled to {self.parent.loop_mode}")
 
     def update_play_button(self):
         """Switches Play/Pause Icon"""
