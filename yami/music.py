@@ -23,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .spatial_audio import SpatialAudioFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -43,12 +42,13 @@ class MusicPlayer(ctk.CTk):
         self.title(TITLE)
 
         # STATE
-        self.playlist = []
+        self.playlist = []  # 现在是包含分组和歌曲的层次结构
         self.current_folder = ""
         self.current_song_index = 0
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
+        self.current_group = None  # 当前选中的分组
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -69,9 +69,6 @@ class MusicPlayer(ctk.CTk):
         self.setup_widget_packing()
 
         self.setup_keybindings()
-        
-        # Spatial audio mode
-        self.spatial_audio_mode = False
 
         self.update_loop()
         self.after(EVENT_INTERVAL, self.update)
@@ -94,8 +91,6 @@ class MusicPlayer(ctk.CTk):
 
     def load_and_play_song(self, index):
         if self.is_playing:
-            self.left_channel.stop()
-            self.right_channel.stop()
             pygame.mixer.music.stop()
         
         self.current_song_index = index
@@ -109,11 +104,8 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # Load music into both channels for spatial audio
-            self.left_sound = pygame.mixer.Sound(song_path)
-            self.right_sound = pygame.mixer.Sound(song_path)
-            self.left_channel.play(self.left_sound, loops=-1)
-            self.right_channel.play(self.right_sound, loops=-1)
+            pygame.mixer.music.load(song_path)
+            pygame.mixer.music.play()
             self.is_playing = True
             self.song_start_time = time.time()
             
@@ -142,39 +134,21 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
-        # 先停止当前播放
-        if self.is_playing:
-            self.left_channel.stop()
-            self.right_channel.stop()
-            pygame.mixer.music.stop()
-            self.is_playing = False
-        # 播放下一首
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
             self.load_and_play_song(0)  # 循环播放
         
-        # UPDATE SELECTION
-        self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_frame.song_list.select_set(self.current_song_index)
+
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
-        # 先停止当前播放
-        if self.is_playing:
-            self.left_channel.stop()
-            self.right_channel.stop()
-            pygame.mixer.music.stop()
-            self.is_playing = False
-        # 播放上一首
         if self.current_song_index > 0:
             self.load_and_play_song(self.current_song_index - 1)
         else:
             self.load_and_play_song(len(self.playlist) - 1)  # 循环播放
         
-        # UPDATE SELECTION
-        self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_frame.song_list.select_set(self.current_song_index)
+
 
     def get_song_length(self) -> int:
         logging.debug("got song length")
@@ -319,10 +293,7 @@ class MusicPlayer(ctk.CTk):
     def initialize_pygame(self):
         """Initialize pygame mixer for audio playback"""
         pygame.mixer.init()
-        pygame.mixer.set_num_channels(2)  # 左右声道
-        self.left_channel = pygame.mixer.Channel(0)
-        self.right_channel = pygame.mixer.Channel(1)
-        logging.debug("initialized pygame mixer with 2 channels")
+        logging.debug("initialized pygame mixer")
 
     def setup_icons(self):
         self.play_icon = ctk.CTkImage(Image.open("yami/data/play_arrow.png"))
@@ -340,7 +311,6 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.spatial_audio_frame = SpatialAudioFrame(self)
 
     def setup_keybindings(self):
         """
@@ -363,31 +333,8 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-        # Spatial audio frame is initially hidden
-        self.spatial_audio_frame.pack_forget()
         logging.debug("widgets packed")
 
-    def toggle_spatial_audio_mode(self):
-        """Toggle between normal and spatial audio mode"""
-        self.spatial_audio_mode = not self.spatial_audio_mode
-        
-        if self.spatial_audio_mode:
-            # Hide cover art and lyrics frames
-            self.cover_art_frame.pack_forget()
-            self.lyrics_frame.pack_forget()
-            # Show spatial audio frame
-            self.spatial_audio_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            # Update button text
-            self.topbar.spatial_audio_btn.configure(text="关闭 3D")
-        else:
-            # Hide spatial audio frame
-            self.spatial_audio_frame.pack_forget()
-            # Show cover art and lyrics frames
-            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            # Update button text
-            self.topbar.spatial_audio_btn.configure(text="3D 音效")
-    
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()

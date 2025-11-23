@@ -48,20 +48,11 @@ class TopBar(ctk.CTkFrame):
             width=70,
             image=parent.music_icon,
         )
-        
-        self.spatial_audio_btn = ctk.CTkButton(
-            self,
-            text="3D 音效",
-            font=("roboto", 15),
-            width=70,
-            command=self.toggle_spatial_audio
-        )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.spatial_audio_btn.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
+        self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
 
     # FOR ADDING SONGS TO PLAYLIST
@@ -76,8 +67,7 @@ class TopBar(ctk.CTkFrame):
             return
 
         # CLEAR PLAYLIST AND LISTBOX
-        self.parent.playlist_frame.song_list.delete(0, tk.END)
-        self.parent.playlist = []
+        self.parent.playlist_frame.clear()
 
         # FILTER MUSIC FILES
         for root, _, files in os.walk(self.parent.current_folder):
@@ -85,11 +75,7 @@ class TopBar(ctk.CTkFrame):
 
             for file in music_files:
                 file_path = os.path.join(root, file)
-                artistname, title = self.get_name_and_title_of_file(file_path)
-                self.parent.playlist.append(file_path)
-                self.parent.playlist_frame.song_list.insert(
-                    "end", f"• {title} - {artistname}"
-                )
+                self.parent.playlist_frame.add_song(file_path)
         os.chdir(self.parent.current_folder)
 
     def prompt_download(self):
@@ -157,11 +143,4 @@ class TopBar(ctk.CTkFrame):
         except Exception as e:
             logging.error(e)
 
-        self.parent.playlist.append(self.downloaded_song_path)
-        self.parent.playlist_frame.song_list.insert(
-            "end", f"• {Path(self.downloaded_song_path).stem}"
-        )
-    
-    def toggle_spatial_audio(self):
-        """Toggle between normal and spatial audio mode"""
-        self.parent.toggle_spatial_audio_mode()
+        self.parent.playlist_frame.add_song(self.downloaded_song_path)
