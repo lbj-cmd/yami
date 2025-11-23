@@ -14,7 +14,6 @@ import spotdl.utils.search
 import spotdl
 
 from .util import SUPPORTED_FORMATS
-from .batch_editor import BatchTagEditor
 
 
 class TopBar(ctk.CTkFrame):
@@ -50,25 +49,20 @@ class TopBar(ctk.CTkFrame):
             image=parent.music_icon,
         )
         
-        self.batch_editor = ctk.CTkButton(
+        self.spatial_audio_btn = ctk.CTkButton(
             self,
-            text="Batch Edit",
+            text="3D 音效",
             font=("roboto", 15),
             width=70,
-            image=parent.music_icon,
-            command=self.open_batch_editor,
+            command=self.toggle_spatial_audio
         )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.batch_editor.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.spatial_audio_btn.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
-    
-    def open_batch_editor(self):
-        """Open the batch tag editor"""
-        editor = BatchTagEditor(self.parent)
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
@@ -167,3 +161,7 @@ class TopBar(ctk.CTkFrame):
         self.parent.playlist_frame.song_list.insert(
             "end", f"• {Path(self.downloaded_song_path).stem}"
         )
+    
+    def toggle_spatial_audio(self):
+        """Toggle between normal and spatial audio mode"""
+        self.parent.toggle_spatial_audio_mode()

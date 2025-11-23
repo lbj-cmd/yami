@@ -82,11 +82,13 @@ class ControlBar(ctk.CTkFrame):
         """Plays Or Pauses The Music"""
 
         if self.parent.is_playing:
-            pygame.mixer.music.pause()
+            self.parent.left_channel.pause()
+            self.parent.right_channel.pause()
             self.parent.is_playing = False
             logging.debug("paused")
         else:
-            pygame.mixer.music.unpause()
+            self.parent.left_channel.unpause()
+            self.parent.right_channel.unpause()
             self.parent.is_playing = True
             logging.debug("resumed")
         self.update_play_button()

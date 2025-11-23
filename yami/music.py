@@ -15,7 +15,6 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw
 import spotdl
 import pygame
-from tkinterdnd2.TkinterDnD import DnDWrapper, _require
 
 
 from .topbar import TopBar
@@ -24,6 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .spatial_audio import SpatialAudioFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -31,15 +31,12 @@ ctk.set_default_color_theme("yami/data/theme.json")
 ctk.set_appearance_mode("dark")
 
 
-class MusicPlayer(DnDWrapper, ctk.CTk):
+class MusicPlayer(ctk.CTk):
     """ROOT"""
 
     def __init__(self: ctk.CTk, loop=None):
         """ROOT INIT"""
         super().__init__()
-        
-        # Initialize DnD engine
-        self.TkdndVersion = _require(self)
 
         # CONFIG
         self.geometry(GEOMETRY)
@@ -72,6 +69,9 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
         self.setup_widget_packing()
 
         self.setup_keybindings()
+        
+        # Spatial audio mode
+        self.spatial_audio_mode = False
 
         self.update_loop()
         self.after(EVENT_INTERVAL, self.update)
@@ -94,6 +94,8 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
 
     def load_and_play_song(self, index):
         if self.is_playing:
+            self.left_channel.stop()
+            self.right_channel.stop()
             pygame.mixer.music.stop()
         
         self.current_song_index = index
@@ -106,12 +108,12 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
                 self.song_length = audio.info.length
             else:
                 self.song_length = 180  # 默认3分钟
-            # 重置进度条
-            self.bottom_frame.progress_bar.set(0.0)
-            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
             
-            pygame.mixer.music.load(song_path)
-            pygame.mixer.music.play()
+            # Load music into both channels for spatial audio
+            self.left_sound = pygame.mixer.Sound(song_path)
+            self.right_sound = pygame.mixer.Sound(song_path)
+            self.left_channel.play(self.left_sound, loops=-1)
+            self.right_channel.play(self.right_sound, loops=-1)
             self.is_playing = True
             self.song_start_time = time.time()
             
@@ -140,6 +142,13 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
+        # 先停止当前播放
+        if self.is_playing:
+            self.left_channel.stop()
+            self.right_channel.stop()
+            pygame.mixer.music.stop()
+            self.is_playing = False
+        # 播放下一首
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
@@ -151,6 +160,13 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
+        # 先停止当前播放
+        if self.is_playing:
+            self.left_channel.stop()
+            self.right_channel.stop()
+            pygame.mixer.music.stop()
+            self.is_playing = False
+        # 播放上一首
         if self.current_song_index > 0:
             self.load_and_play_song(self.current_song_index - 1)
         else:
@@ -167,12 +183,12 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
     def get_song_title(self) -> str:
         try:
             song_path = self.playlist[self.current_song_index]
-            # 每次都重新读取文件，确保获取最新的元数据
-            audio = File(song_path, easy=True)
+            audio = File(song_path)
             if audio is not None:
-                title = audio.get('title', [''])
-                if title:
-                    return str(title[0])
+                if hasattr(audio, 'tags') and audio.tags is not None:
+                    title = audio.tags.get('TIT2', audio.tags.get('TITLE', ['']))
+                    if title:
+                        return str(title[0])
             # 如果无法获取标题，使用文件名
             return Path(song_path).stem
         except Exception as e:
@@ -182,16 +198,14 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
     def get_album_cover(self) -> ctk.CTkImage | None:
         try:
             song_path = self.playlist[self.current_song_index]
-            # 每次都重新读取文件，确保获取最新的元数据
             audio = File(song_path)
             
             # 尝试从音频文件获取封面
-            if audio is not None:
-                # 对于 ID3 标签（MP3）
-                if hasattr(audio, 'tags') and audio.tags is not None:
+            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
+                if hasattr(audio.tags, 'get'):
                     # 尝试获取 APIC 标签（专辑封面）
                     for tag in audio.tags.keys():
-                        if 'APIC' in tag:
+                        if 'APIC' in tag or 'PIC' in tag:
                             try:
                                 cover_data = audio.tags[tag].data
                                 image = Image.open(io.BytesIO(cover_data))
@@ -201,17 +215,6 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
                                 )
                             except:
                                 pass
-                # 对于其他格式
-                elif hasattr(audio, 'pictures') and audio.pictures:
-                    try:
-                        cover_data = audio.pictures[0].data
-                        image = Image.open(io.BytesIO(cover_data))
-                        return ctk.CTkImage(
-                            self.round_corners(image, 20),
-                            size=(250, 250),
-                        )
-                    except:
-                        pass
             
             # 使用默认封面
             return ctk.CTkImage(
@@ -228,10 +231,9 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
     def get_song_artist(self) -> str:
         try:
             song_path = self.playlist[self.current_song_index]
-            # 每次都重新读取文件，确保获取最新的元数据
-            audio = File(song_path, easy=True)
-            if audio is not None:
-                artist = audio.get('artist', [''])
+            audio = File(song_path)
+            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
+                artist = audio.tags.get('TPE1', audio.tags.get('ARTIST', ['']))
                 if artist:
                     return str(artist[0])
             return "Unknown Artist"
@@ -274,72 +276,28 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
         return lyrics
     
     def load_lyrics(self):
-        """加载当前歌曲的歌词"""
-        try:
-            song_path = self.playlist[self.current_song_index]
-            # 尝试从音频文件的元数据中获取歌词
-            audio = File(song_path)
-            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
-                # 尝试获取 USLT 标签（同步歌词）
-                for tag in audio.tags.keys():
-                    if 'USLT' in tag:
-                        try:
-                            lyrics_content = audio.tags[tag].text
-                            self.lyrics = self.parse_lrc(lyrics_content)
-                            self.lyrics_frame.update_lyrics_list(self.lyrics)
-                            return
-                        except:
-                            pass
-                # 尝试获取 UNSYNCEDLYRICS 标签（非同步歌词）
-                for tag in audio.tags.keys():
-                    if 'UNSYNCEDLYRICS' in tag:
-                        try:
-                            lyrics_content = audio.tags[tag].text
-                            self.lyrics = self.parse_lrc(lyrics_content)
-                            self.lyrics_frame.update_lyrics_list(self.lyrics)
-                            return
-                        except:
-                            pass
+        """加载当前歌曲的歌词文件"""
+        if not self.playlist or self.current_song_index >= len(self.playlist):
+            self.lyrics = []
+            return
             
-            # 如果无法从元数据中获取歌词，尝试加载同名的 LRC 文件
-            lrc_path = Path(song_path).with_suffix('.lrc')
+        song_path = self.playlist[self.current_song_index]
+        lrc_path = Path(song_path).with_suffix('.lrc')
+        
+        try:
             if lrc_path.exists():
                 with open(lrc_path, 'r', encoding='utf-8') as f:
-                    lyrics_content = f.read()
-                    self.lyrics = self.parse_lrc(lyrics_content)
-                    self.lyrics_frame.update_lyrics_list(self.lyrics)
-            else:
-                self.lyrics = []
+                    lrc_content = f.read()
+                self.lyrics = self.parse_lrc(lrc_content)
                 self.lyrics_frame.update_lyrics_list(self.lyrics)
-        except Exception as e:
-            logging.exception(e)
-            self.lyrics = []
-            self.lyrics_frame.update_lyrics_list(self.lyrics)
-    
-    def update_current_song_info(self):
-        """更新当前歌曲的信息"""
-        try:
-            # 重新加载歌曲长度
-            song_path = self.playlist[self.current_song_index]
-            audio = File(song_path)
-            if audio is not None:
-                self.song_length = audio.info.length
+                logging.debug("Loaded lyrics from %s", lrc_path)
             else:
-                self.song_length = 180  # 默认3分钟
-            
-            # 更新歌曲信息显示
-            self.change_info()
-            
-            # 重新加载歌词
-            self.load_lyrics()
-            
-            # 重置进度条
-            self.bottom_frame.progress_bar.set(0.0)
-            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
-            
-            logging.debug("Updated current song info")
+                self.lyrics = []  # 没有歌词文件
+                self.lyrics_frame.update_lyrics_list(self.lyrics)
+                logging.debug("No lyrics file found for %s", song_path)
         except Exception as e:
-            logging.exception(e)
+            self.lyrics = []
+            logging.exception("Failed to load lyrics: %s", e)
 
     def get_song_position(self) -> float:
         if self.is_playing:
@@ -361,7 +319,10 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
     def initialize_pygame(self):
         """Initialize pygame mixer for audio playback"""
         pygame.mixer.init()
-        logging.debug("initialized pygame mixer")
+        pygame.mixer.set_num_channels(2)  # 左右声道
+        self.left_channel = pygame.mixer.Channel(0)
+        self.right_channel = pygame.mixer.Channel(1)
+        logging.debug("initialized pygame mixer with 2 channels")
 
     def setup_icons(self):
         self.play_icon = ctk.CTkImage(Image.open("yami/data/play_arrow.png"))
@@ -379,6 +340,7 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
+        self.spatial_audio_frame = SpatialAudioFrame(self)
 
     def setup_keybindings(self):
         """
@@ -401,8 +363,31 @@ class MusicPlayer(DnDWrapper, ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+        # Spatial audio frame is initially hidden
+        self.spatial_audio_frame.pack_forget()
         logging.debug("widgets packed")
 
+    def toggle_spatial_audio_mode(self):
+        """Toggle between normal and spatial audio mode"""
+        self.spatial_audio_mode = not self.spatial_audio_mode
+        
+        if self.spatial_audio_mode:
+            # Hide cover art and lyrics frames
+            self.cover_art_frame.pack_forget()
+            self.lyrics_frame.pack_forget()
+            # Show spatial audio frame
+            self.spatial_audio_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            # Update button text
+            self.topbar.spatial_audio_btn.configure(text="关闭 3D")
+        else:
+            # Hide spatial audio frame
+            self.spatial_audio_frame.pack_forget()
+            # Show cover art and lyrics frames
+            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
+            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            # Update button text
+            self.topbar.spatial_audio_btn.configure(text="3D 音效")
+    
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
