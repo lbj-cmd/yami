@@ -15,6 +15,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw
 import spotdl
 import pygame
+from tkinterdnd2.TkinterDnD import DnDWrapper, _require
 
 
 from .topbar import TopBar
@@ -30,12 +31,15 @@ ctk.set_default_color_theme("yami/data/theme.json")
 ctk.set_appearance_mode("dark")
 
 
-class MusicPlayer(ctk.CTk):
+class MusicPlayer(DnDWrapper, ctk.CTk):
     """ROOT"""
 
     def __init__(self: ctk.CTk, loop=None):
         """ROOT INIT"""
         super().__init__()
+        
+        # Initialize DnD engine
+        self.TkdndVersion = _require(self)
 
         # CONFIG
         self.geometry(GEOMETRY)
@@ -48,10 +52,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        self.loop_mode = False  # 循环模式开关
-        self.loop_start = 0.0  # 循环开始时间（秒）
-        self.loop_end = 0.0    # 循环结束时间（秒）
-        self.selected_pointer = None  # 当前选中的指针（"start"或"end"）
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -79,53 +79,18 @@ class MusicPlayer(ctk.CTk):
     def update(self, event=None):
         if self.is_playing:
             current_time = time.time()
-            current_play_time = current_time - self.song_start_time
-            
-            # 检查循环模式
-            if self.loop_mode and self.loop_end > self.loop_start:
-                if current_play_time >= self.loop_end:
-                    # 跳回循环开始点
-                    self.set_current_time(self.loop_start)
-                    current_play_time = self.loop_start
-                elif current_play_time < self.loop_start:
-                    # 如果当前时间在循环开始点之前，跳回循环开始点
-                    self.set_current_time(self.loop_start)
-                    current_play_time = self.loop_start
-            elif current_play_time >= self.song_length:
-                # 正常播放结束，播放下一首
+            song_position = (current_time - self.song_start_time) / self.song_length
+            if song_position >= 1.0:
                 self.play_next_song()
-                return
-            
-            # 更新进度条和播放时间
-            song_position = current_play_time / self.song_length
-            self.bottom_frame.progress_bar.set(song_position)
-            self.control_bar.playback_label.configure(
-                text=make_time_string(int(current_play_time), self.song_length)
-            )
-            
-            # 更新歌词显示
-            if not self.loop_mode:
+            else:
+                self.bottom_frame.progress_bar.set(song_position)
+                self.control_bar.playback_label.configure(
+                    text=make_time_string(int(song_position * self.song_length), self.song_length)
+                )
+                # 更新歌词显示
+                current_play_time = (current_time - self.song_start_time)
                 self.lyrics_frame.update_lyrics(current_play_time)
-            
-            # 更新循环编辑器
-            if self.loop_mode and hasattr(self, 'loop_editor'):
-                self.loop_editor.update()
         self.after(EVENT_INTERVAL, self.update)
-
-    def get_current_time(self):
-        """Get current playback time in seconds"""
-        if self.is_playing:
-            return time.time() - self.song_start_time
-        return 0
-
-    def set_current_time(self, time_in_seconds):
-        """Set current playback time in seconds"""
-        if self.is_playing:
-            pygame.mixer.music.stop()
-            pygame.mixer.music.play(start=time_in_seconds)
-            self.song_start_time = time.time() - time_in_seconds
-        else:
-            self.song_start_time = time.time() - time_in_seconds
 
     def load_and_play_song(self, index):
         if self.is_playing:
@@ -141,6 +106,9 @@ class MusicPlayer(ctk.CTk):
                 self.song_length = audio.info.length
             else:
                 self.song_length = 180  # 默认3分钟
+            # 重置进度条
+            self.bottom_frame.progress_bar.set(0.0)
+            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
             
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.play()
@@ -199,12 +167,12 @@ class MusicPlayer(ctk.CTk):
     def get_song_title(self) -> str:
         try:
             song_path = self.playlist[self.current_song_index]
-            audio = File(song_path)
+            # 每次都重新读取文件，确保获取最新的元数据
+            audio = File(song_path, easy=True)
             if audio is not None:
-                if hasattr(audio, 'tags') and audio.tags is not None:
-                    title = audio.tags.get('TIT2', audio.tags.get('TITLE', ['']))
-                    if title:
-                        return str(title[0])
+                title = audio.get('title', [''])
+                if title:
+                    return str(title[0])
             # 如果无法获取标题，使用文件名
             return Path(song_path).stem
         except Exception as e:
@@ -214,14 +182,16 @@ class MusicPlayer(ctk.CTk):
     def get_album_cover(self) -> ctk.CTkImage | None:
         try:
             song_path = self.playlist[self.current_song_index]
+            # 每次都重新读取文件，确保获取最新的元数据
             audio = File(song_path)
             
             # 尝试从音频文件获取封面
-            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
-                if hasattr(audio.tags, 'get'):
+            if audio is not None:
+                # 对于 ID3 标签（MP3）
+                if hasattr(audio, 'tags') and audio.tags is not None:
                     # 尝试获取 APIC 标签（专辑封面）
                     for tag in audio.tags.keys():
-                        if 'APIC' in tag or 'PIC' in tag:
+                        if 'APIC' in tag:
                             try:
                                 cover_data = audio.tags[tag].data
                                 image = Image.open(io.BytesIO(cover_data))
@@ -231,6 +201,17 @@ class MusicPlayer(ctk.CTk):
                                 )
                             except:
                                 pass
+                # 对于其他格式
+                elif hasattr(audio, 'pictures') and audio.pictures:
+                    try:
+                        cover_data = audio.pictures[0].data
+                        image = Image.open(io.BytesIO(cover_data))
+                        return ctk.CTkImage(
+                            self.round_corners(image, 20),
+                            size=(250, 250),
+                        )
+                    except:
+                        pass
             
             # 使用默认封面
             return ctk.CTkImage(
@@ -247,9 +228,10 @@ class MusicPlayer(ctk.CTk):
     def get_song_artist(self) -> str:
         try:
             song_path = self.playlist[self.current_song_index]
-            audio = File(song_path)
-            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
-                artist = audio.tags.get('TPE1', audio.tags.get('ARTIST', ['']))
+            # 每次都重新读取文件，确保获取最新的元数据
+            audio = File(song_path, easy=True)
+            if audio is not None:
+                artist = audio.get('artist', [''])
                 if artist:
                     return str(artist[0])
             return "Unknown Artist"
@@ -292,28 +274,72 @@ class MusicPlayer(ctk.CTk):
         return lyrics
     
     def load_lyrics(self):
-        """加载当前歌曲的歌词文件"""
-        if not self.playlist or self.current_song_index >= len(self.playlist):
-            self.lyrics = []
-            return
-            
-        song_path = self.playlist[self.current_song_index]
-        lrc_path = Path(song_path).with_suffix('.lrc')
-        
+        """加载当前歌曲的歌词"""
         try:
+            song_path = self.playlist[self.current_song_index]
+            # 尝试从音频文件的元数据中获取歌词
+            audio = File(song_path)
+            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
+                # 尝试获取 USLT 标签（同步歌词）
+                for tag in audio.tags.keys():
+                    if 'USLT' in tag:
+                        try:
+                            lyrics_content = audio.tags[tag].text
+                            self.lyrics = self.parse_lrc(lyrics_content)
+                            self.lyrics_frame.update_lyrics_list(self.lyrics)
+                            return
+                        except:
+                            pass
+                # 尝试获取 UNSYNCEDLYRICS 标签（非同步歌词）
+                for tag in audio.tags.keys():
+                    if 'UNSYNCEDLYRICS' in tag:
+                        try:
+                            lyrics_content = audio.tags[tag].text
+                            self.lyrics = self.parse_lrc(lyrics_content)
+                            self.lyrics_frame.update_lyrics_list(self.lyrics)
+                            return
+                        except:
+                            pass
+            
+            # 如果无法从元数据中获取歌词，尝试加载同名的 LRC 文件
+            lrc_path = Path(song_path).with_suffix('.lrc')
             if lrc_path.exists():
                 with open(lrc_path, 'r', encoding='utf-8') as f:
-                    lrc_content = f.read()
-                self.lyrics = self.parse_lrc(lrc_content)
-                self.lyrics_frame.update_lyrics_list(self.lyrics)
-                logging.debug("Loaded lyrics from %s", lrc_path)
+                    lyrics_content = f.read()
+                    self.lyrics = self.parse_lrc(lyrics_content)
+                    self.lyrics_frame.update_lyrics_list(self.lyrics)
             else:
-                self.lyrics = []  # 没有歌词文件
+                self.lyrics = []
                 self.lyrics_frame.update_lyrics_list(self.lyrics)
-                logging.debug("No lyrics file found for %s", song_path)
         except Exception as e:
+            logging.exception(e)
             self.lyrics = []
-            logging.exception("Failed to load lyrics: %s", e)
+            self.lyrics_frame.update_lyrics_list(self.lyrics)
+    
+    def update_current_song_info(self):
+        """更新当前歌曲的信息"""
+        try:
+            # 重新加载歌曲长度
+            song_path = self.playlist[self.current_song_index]
+            audio = File(song_path)
+            if audio is not None:
+                self.song_length = audio.info.length
+            else:
+                self.song_length = 180  # 默认3分钟
+            
+            # 更新歌曲信息显示
+            self.change_info()
+            
+            # 重新加载歌词
+            self.load_lyrics()
+            
+            # 重置进度条
+            self.bottom_frame.progress_bar.set(0.0)
+            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
+            
+            logging.debug("Updated current song info")
+        except Exception as e:
+            logging.exception(e)
 
     def get_song_position(self) -> float:
         if self.is_playing:
@@ -359,8 +385,6 @@ class MusicPlayer(ctk.CTk):
         :param `<F9>`: play next
         :param `<F8>`: play previous
         :param `<Space>`:  play or pause
-        :param `<Left>`: 微调选中的指针向左（0.1s）
-        :param `<Right>`: 微调选中的指针向右（0.1s）
         """
 
         self.bind("<F10>", self.play_next_song)
@@ -368,8 +392,6 @@ class MusicPlayer(ctk.CTk):
         self.bind("<F9>", self.control_bar.play_pause)
         self.bind("<space>", self.control_bar.play_pause)
         self.bind("<Control-o>", self.topbar.choose_folder)
-        self.bind("<Left>", self.fine_tune_pointer)
-        self.bind("<Right>", self.fine_tune_pointer)
         logging.debug("setup keybinds")
 
     def setup_widget_packing(self):
@@ -380,32 +402,6 @@ class MusicPlayer(ctk.CTk):
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
-
-    def fine_tune_pointer(self, event):
-        """微调选中的循环指针"""
-        if not self.loop_mode or not self.selected_pointer:
-            return
-        
-        # 微调步长（0.1秒）
-        step = 0.1
-        if event.keysym == "Left":
-            step = -step
-        
-        # 更新指针位置
-        if self.selected_pointer == "start":
-            new_start = self.loop_start + step
-            # 确保开始时间在有效范围内且小于结束时间
-            self.loop_start = max(0.0, min(new_start, self.loop_end - 0.1))
-        else:  # "end"
-            new_end = self.loop_end + step
-            # 确保结束时间在有效范围内且大于开始时间
-            self.loop_end = min(self.song_length, max(new_end, self.loop_start + 0.1))
-        
-        # 更新循环编辑器显示
-        if hasattr(self, 'loop_editor'):
-            self.loop_editor.update_loop_region()
-        
-        logging.debug(f"fine tuned {self.selected_pointer} pointer by {step}s")
 
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)

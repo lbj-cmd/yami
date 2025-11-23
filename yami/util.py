@@ -15,9 +15,6 @@ class PlayerState(Enum):
 
 def make_time_string(song_position, song_length):
     curtime = song_position * song_length
-    
-    # 确保当前时间不超过总时长
-    curtime = min(curtime, song_length)
 
     cur_minutes = int(curtime // 60)
     cur_seconds = int(curtime % 60)
@@ -25,4 +22,4 @@ def make_time_string(song_position, song_length):
     song_min = int(song_length // 60)
     song_sec = int(song_length % 60)
 
-    return f"{cur_minutes:02d}:{cur_seconds:02d} / {song_min:02d}:{song_sec:02d}" 
+    return f"{cur_minutes:02d}:{cur_seconds:02d} / {song_min:02d}:{song_sec:02d}"
