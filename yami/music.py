@@ -5,13 +5,17 @@ import tkinter as tk
 import tempfile
 import asyncio
 import logging
+import time
+import io
+import re
 
 
 from mutagen import File, id3
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 import spotdl
-import vlc
+import pygame
+from tkinterdnd2.TkinterDnD import DnDWrapper, _require
 
 
 from .topbar import TopBar
@@ -19,6 +23,7 @@ from .playlist import PlaylistFrame
 from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
+from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -26,12 +31,15 @@ ctk.set_default_color_theme("yami/data/theme.json")
 ctk.set_appearance_mode("dark")
 
 
-class MusicPlayer(ctk.CTk):
+class MusicPlayer(DnDWrapper, ctk.CTk):
     """ROOT"""
 
     def __init__(self: ctk.CTk, loop=None):
         """ROOT INIT"""
         super().__init__()
+        
+        # Initialize DnD engine
+        self.TkdndVersion = _require(self)
 
         # CONFIG
         self.geometry(GEOMETRY)
@@ -40,15 +48,23 @@ class MusicPlayer(ctk.CTk):
         # STATE
         self.playlist = []
         self.current_folder = ""
+        self.current_song_index = 0
+        self.is_playing = False
+        self.song_start_time = 0
+        self.song_length = 0
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
-        self.downloader = spotdl.Downloader(spotdl.DownloaderOptions(threads=2))
+        self.downloader = None  # 延迟初始化
         spotdl.SpotifyClient.init(
             "5f573c9620494bae87890c0f08a60293",
             "212476d9b0f3472eaa762d90b19b0ba8",
         )
+        
+        # 歌词相关
+        self.lyrics = []  # 存储歌词和时间戳的列表 [(time, lyric), ...]
+        self.current_lyric_index = -1  # 当前显示的歌词索引
 
-        self.initialize_vlc()
+        self.initialize_pygame()
 
         # TKINTER SETUP
         self.setup_icons()
@@ -57,34 +73,58 @@ class MusicPlayer(ctk.CTk):
 
         self.setup_keybindings()
 
-        self.event_manager = self.music_list_player.event_manager()
-        self.event_manager.event_attach(
-            vlc.EventType.MediaListPlayerNextItemSet, self.change_info
-        )
         self.update_loop()
         self.after(EVENT_INTERVAL, self.update)
 
     def update(self, event=None):
-        if self.music_list_player.get_state() == vlc.State.Playing:
-
-            song_position = self.music.get_position()
-            self.bottom_frame.progress_bar.set(song_position)
-
-            self.control_bar.playback_label.configure(
-                text=make_time_string(song_position, self.music.get_length() // 1000)
-            )
+        if self.is_playing:
+            current_time = time.time()
+            song_position = (current_time - self.song_start_time) / self.song_length
+            if song_position >= 1.0:
+                self.play_next_song()
+            else:
+                self.bottom_frame.progress_bar.set(song_position)
+                self.control_bar.playback_label.configure(
+                    text=make_time_string(int(song_position * self.song_length), self.song_length)
+                )
+                # 更新歌词显示
+                current_play_time = (current_time - self.song_start_time)
+                self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
     def load_and_play_song(self, index):
-
-        self.music_list_player.pause()
-        self.music_list_player.play_item_at_index(index)
-        self.playlist_index = index
-
-        # CHANGE INFO
-        self.change_info()
-
-        logging.debug("playing %s", self.get_song_title())
+        if self.is_playing:
+            pygame.mixer.music.stop()
+        
+        self.current_song_index = index
+        song_path = self.playlist[index]
+        
+        try:
+            # 获取歌曲长度
+            audio = File(song_path)
+            if audio is not None:
+                self.song_length = audio.info.length
+            else:
+                self.song_length = 180  # 默认3分钟
+            # 重置进度条
+            self.bottom_frame.progress_bar.set(0.0)
+            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
+            
+            pygame.mixer.music.load(song_path)
+            pygame.mixer.music.play()
+            self.is_playing = True
+            self.song_start_time = time.time()
+            
+            # CHANGE INFO
+            self.change_info()
+            
+            # 加载歌词
+            self.load_lyrics()
+            self.current_lyric_index = -1
+            
+            logging.debug("playing %s", self.get_song_title())
+        except Exception as e:
+            logging.exception(e)
 
     def change_info(self, event=None):
         logging.debug("changing art,name of this song")
@@ -100,73 +140,211 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
-        self.music_list_player.next()
-        self.change_info()
+        if self.current_song_index < len(self.playlist) - 1:
+            self.load_and_play_song(self.current_song_index + 1)
+        else:
+            self.load_and_play_song(0)  # 循环播放
+        
         # UPDATE SELECTION
         self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_index+=1
-        self.playlist_frame.song_list.select_set(self.playlist_index)
+        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
-        self.music_list_player.previous()
-        self.change_info()
+        if self.current_song_index > 0:
+            self.load_and_play_song(self.current_song_index - 1)
+        else:
+            self.load_and_play_song(len(self.playlist) - 1)  # 循环播放
+        
         # UPDATE SELECTION
         self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_index-=1
-        self.playlist_frame.song_list.select_set(self.playlist_index)
+        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def get_song_length(self) -> int:
         logging.debug("got song length")
-        return self.music.get_length()
+        return int(self.song_length)
 
     def get_song_title(self) -> str:
-        media = self.music_list_player.get_media_player().get_media()
-        logging.debug("got song title")
         try:
-            if media.is_parsed():
-                return media.get_meta(0)
-            else:
-                media.parse()
-                return media.get_meta(0)
+            song_path = self.playlist[self.current_song_index]
+            # 每次都重新读取文件，确保获取最新的元数据
+            audio = File(song_path, easy=True)
+            if audio is not None:
+                title = audio.get('title', [''])
+                if title:
+                    return str(title[0])
+            # 如果无法获取标题，使用文件名
+            return Path(song_path).stem
         except Exception as e:
             logging.exception(e)
-            return ""
+            return Path(song_path).stem if self.current_song_index < len(self.playlist) else ""
 
     def get_album_cover(self) -> ctk.CTkImage | None:
         try:
-            media = self.music_list_player.get_media_player().get_media()
-            media.parse()
-            logging.debug("got album cover")
+            song_path = self.playlist[self.current_song_index]
+            # 每次都重新读取文件，确保获取最新的元数据
+            audio = File(song_path)
+            
+            # 尝试从音频文件获取封面
+            if audio is not None:
+                # 对于 ID3 标签（MP3）
+                if hasattr(audio, 'tags') and audio.tags is not None:
+                    # 尝试获取 APIC 标签（专辑封面）
+                    for tag in audio.tags.keys():
+                        if 'APIC' in tag:
+                            try:
+                                cover_data = audio.tags[tag].data
+                                image = Image.open(io.BytesIO(cover_data))
+                                return ctk.CTkImage(
+                                    self.round_corners(image, 20),
+                                    size=(250, 250),
+                                )
+                            except:
+                                pass
+                # 对于其他格式
+                elif hasattr(audio, 'pictures') and audio.pictures:
+                    try:
+                        cover_data = audio.pictures[0].data
+                        image = Image.open(io.BytesIO(cover_data))
+                        return ctk.CTkImage(
+                            self.round_corners(image, 20),
+                            size=(250, 250),
+                        )
+                    except:
+                        pass
+            
+            # 使用默认封面
             return ctk.CTkImage(
-                self.round_corners(
-                    Image.open(
-                        Path.from_uri(media.get_meta(15))
-                    ),  # gives the direct uri to cover jpg
-                    20,
-                ),
+                self.round_corners(Image.open("yami/data/music.png"), 20),
                 size=(250, 250),
             )
         except Exception as e:
             logging.exception(e)
-            return
-        return
+            return ctk.CTkImage(
+                self.round_corners(Image.open("yami/data/music.png"), 20),
+                size=(250, 250),
+            )
 
     def get_song_artist(self) -> str:
-        media = self.music_list_player.get_media_player().get_media()
-        logging.debug("got song artist")
         try:
-            if media.is_parsed():
-                return media.get_meta(1)
-            else:
-                media.parse()
-                return media.get_meta(1)
+            song_path = self.playlist[self.current_song_index]
+            # 每次都重新读取文件，确保获取最新的元数据
+            audio = File(song_path, easy=True)
+            if audio is not None:
+                artist = audio.get('artist', [''])
+                if artist:
+                    return str(artist[0])
+            return "Unknown Artist"
         except Exception as e:
             logging.exception(e)
-            return ""
+            return "Unknown Artist"
+    
+    def parse_lrc(self, lrc_content: str) -> list:
+        """解析LRC格式的歌词内容"""
+        lyrics = []
+        # 匹配时间戳的正则表达式：[mm:ss.xx] 或 [mm:ss]，支持多个时间戳对应同一歌词
+        time_tag_pattern = r'\[(\d{1,2}):(\d{2})(?:\.(\d{2,3}))?\]'
+        
+        lines = lrc_content.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 提取所有时间戳
+            time_tags = re.findall(time_tag_pattern, line)
+            if not time_tags:
+                continue
+                
+            # 提取歌词内容
+            lyric_content = re.sub(time_tag_pattern, '', line).strip()
+            if not lyric_content:
+                continue
+                
+            # 将时间戳转换为秒
+            for tag in time_tags:
+                minutes = int(tag[0])
+                seconds = int(tag[1])
+                milliseconds = int(tag[2]) if tag[2] else 0
+                total_seconds = minutes * 60 + seconds + milliseconds / 1000
+                lyrics.append((total_seconds, lyric_content))
+        
+        # 按时间戳排序
+        lyrics.sort(key=lambda x: x[0])
+        return lyrics
+    
+    def load_lyrics(self):
+        """加载当前歌曲的歌词"""
+        try:
+            song_path = self.playlist[self.current_song_index]
+            # 尝试从音频文件的元数据中获取歌词
+            audio = File(song_path)
+            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
+                # 尝试获取 USLT 标签（同步歌词）
+                for tag in audio.tags.keys():
+                    if 'USLT' in tag:
+                        try:
+                            lyrics_content = audio.tags[tag].text
+                            self.lyrics = self.parse_lrc(lyrics_content)
+                            self.lyrics_frame.update_lyrics_list(self.lyrics)
+                            return
+                        except:
+                            pass
+                # 尝试获取 UNSYNCEDLYRICS 标签（非同步歌词）
+                for tag in audio.tags.keys():
+                    if 'UNSYNCEDLYRICS' in tag:
+                        try:
+                            lyrics_content = audio.tags[tag].text
+                            self.lyrics = self.parse_lrc(lyrics_content)
+                            self.lyrics_frame.update_lyrics_list(self.lyrics)
+                            return
+                        except:
+                            pass
+            
+            # 如果无法从元数据中获取歌词，尝试加载同名的 LRC 文件
+            lrc_path = Path(song_path).with_suffix('.lrc')
+            if lrc_path.exists():
+                with open(lrc_path, 'r', encoding='utf-8') as f:
+                    lyrics_content = f.read()
+                    self.lyrics = self.parse_lrc(lyrics_content)
+                    self.lyrics_frame.update_lyrics_list(self.lyrics)
+            else:
+                self.lyrics = []
+                self.lyrics_frame.update_lyrics_list(self.lyrics)
+        except Exception as e:
+            logging.exception(e)
+            self.lyrics = []
+            self.lyrics_frame.update_lyrics_list(self.lyrics)
+    
+    def update_current_song_info(self):
+        """更新当前歌曲的信息"""
+        try:
+            # 重新加载歌曲长度
+            song_path = self.playlist[self.current_song_index]
+            audio = File(song_path)
+            if audio is not None:
+                self.song_length = audio.info.length
+            else:
+                self.song_length = 180  # 默认3分钟
+            
+            # 更新歌曲信息显示
+            self.change_info()
+            
+            # 重新加载歌词
+            self.load_lyrics()
+            
+            # 重置进度条
+            self.bottom_frame.progress_bar.set(0.0)
+            self.control_bar.playback_label.configure(text=make_time_string(0, self.song_length))
+            
+            logging.debug("Updated current song info")
+        except Exception as e:
+            logging.exception(e)
 
     def get_song_position(self) -> float:
-        return self.music.get_position()
+        if self.is_playing:
+            return (time.time() - self.song_start_time) / self.song_length
+        return 0.0
 
     def round_corners(self, image, radius) -> Image.Image:
         """Rounds Album Cover"""
@@ -180,17 +358,10 @@ class MusicPlayer(ctk.CTk):
 
         return rounded_image
 
-    def initialize_vlc(self):
-        """initializes and creates
-        :param `self.music_list_player`: vlc.MediaListPlayer
-        :param `self.music`:             vlc.MediaPlayer
-        :param `self.vlc_instance`:      vlc.Instance
-        :returns: some vlc attributes
-        """
-        self.music_list_player: vlc.MediaListPlayer = vlc.MediaListPlayer()
-        self.music: vlc.MediaPlayer = self.music_list_player.get_media_player()
-        self.vlc_instance: vlc.Instance = self.music_list_player.get_instance()
-        logging.debug("initialized vlc")
+    def initialize_pygame(self):
+        """Initialize pygame mixer for audio playback"""
+        pygame.mixer.init()
+        logging.debug("initialized pygame mixer")
 
     def setup_icons(self):
         self.play_icon = ctk.CTkImage(Image.open("yami/data/play_arrow.png"))
@@ -207,6 +378,7 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame = PlaylistFrame(self)
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
+        self.lyrics_frame = LyricsFrame(self)
 
     def setup_keybindings(self):
         """
@@ -228,6 +400,7 @@ class MusicPlayer(ctk.CTk):
         self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
+        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
 
     def update_loop(self):
