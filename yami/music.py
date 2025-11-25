@@ -23,7 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .spectrum import SpectrumVisualizer
+from .database import Database
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -52,6 +52,7 @@ class MusicPlayer(ctk.CTk):
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
+        self.db = Database()
         spotdl.SpotifyClient.init(
             "5f573c9620494bae87890c0f08a60293",
             "212476d9b0f3472eaa762d90b19b0ba8",
@@ -115,6 +116,12 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
+            
+            # 增加播放计数
+            asyncio.run_coroutine_threadsafe(
+                self.db.update_play_count(song_path),
+                self.loop
+            )
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -218,6 +225,31 @@ class MusicPlayer(ctk.CTk):
         except Exception as e:
             logging.exception(e)
             return "Unknown Artist"
+
+    async def toggle_favorite(self, song_path):
+        try:
+            return await self.db.toggle_favorite(song_path)
+        except Exception as e:
+            logging.exception(e)
+            return False
+
+    def get_song_path(self):
+        if self.current_song_index < len(self.playlist):
+            return self.playlist[self.current_song_index]
+        return None
+
+    def get_song_title_for_path(self, song_path):
+        try:
+            audio = File(song_path)
+            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
+                title = audio.tags.get('TIT2', audio.tags.get('TITLE', ['']))
+                if title:
+                    return str(title[0])
+            # 如果无法获取标题，使用文件名
+            return Path(song_path).stem
+        except Exception as e:
+            logging.exception(e)
+            return Path(song_path).stem
     
     def parse_lrc(self, lrc_content: str) -> list:
         """解析LRC格式的歌词内容"""
@@ -315,7 +347,6 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.spectrum_frame = SpectrumVisualizer(self)
 
     def setup_keybindings(self):
         """
@@ -334,7 +365,6 @@ class MusicPlayer(ctk.CTk):
     def setup_widget_packing(self):
         self.topbar.pack(side=tk.TOP, fill=tk.X)
         self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        self.spectrum_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 10))
         self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)

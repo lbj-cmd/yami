@@ -76,6 +76,17 @@ class ControlBar(ctk.CTkFrame):
         self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
         self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
         self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
+        
+        # 收藏按钮
+        self.favorite_button = ctk.CTkButton(
+            self,
+            command=self.toggle_favorite,
+            width=BUTTON_WIDTH,
+            text="",
+            corner_radius=10,
+        )
+        self.favorite_button.grid(row=0, column=5, sticky="nsew", padx=5, pady=10)
+        
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
@@ -113,3 +124,12 @@ class ControlBar(ctk.CTkFrame):
         self.music_title_label.configure(
             text=truncated_title + " - " + artist.replace("/", ",")
         )
+
+    def toggle_favorite(self):
+        song_path = self.parent.get_song_path()
+        if song_path:
+            # 切换收藏状态
+            asyncio.run_coroutine_threadsafe(
+                self.parent.toggle_favorite(song_path),
+                self.parent.loop
+            ).result()
