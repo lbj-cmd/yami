@@ -2,4 +2,6 @@ customtkinter-fix-locale-scaling==5.2.2
 mutagen==1.47.0
 Pillow==12.0.0
 spotdl==4.4.3
-python-vlc
+pygame==2.6.1
+numpy==1.26.4
+scipy==1.11.4
