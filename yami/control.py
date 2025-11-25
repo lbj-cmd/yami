@@ -3,7 +3,7 @@
 import tkinter as tk
 import logging
 import customtkinter as ctk
-import vlc
+import pygame
 from .util import BUTTON_WIDTH
 
 
@@ -76,23 +76,36 @@ class ControlBar(ctk.CTkFrame):
         self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
         self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
         self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
+        
+        # 收藏按钮
+        self.favorite_button = ctk.CTkButton(
+            self,
+            command=self.toggle_favorite,
+            width=BUTTON_WIDTH,
+            text="",
+            corner_radius=10,
+        )
+        self.favorite_button.grid(row=0, column=5, sticky="nsew", padx=5, pady=10)
+        
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
         """Plays Or Pauses The Music"""
 
-        if self.parent.music_list_player.get_state() == vlc.State.Playing:
-            self.parent.music_list_player.pause()
+        if self.parent.is_playing:
+            pygame.mixer.music.pause()
+            self.parent.is_playing = False
             logging.debug("paused")
         else:
-            self.parent.music_list_player.play()
+            pygame.mixer.music.unpause()
+            self.parent.is_playing = True
             logging.debug("resumed")
         self.update_play_button()
 
     def update_play_button(self):
         """Switches Play/Pause Icon"""
 
-        if self.parent.music_list_player.get_state() == vlc.State.Playing:
+        if self.parent.is_playing:
             self.play_button.configure(image=self.pause_icon)
             logging.debug("updated play button to pause")
         else:
@@ -111,3 +124,12 @@ class ControlBar(ctk.CTkFrame):
         self.music_title_label.configure(
             text=truncated_title + " - " + artist.replace("/", ",")
         )
+
+    def toggle_favorite(self):
+        song_path = self.parent.get_song_path()
+        if song_path:
+            # 切换收藏状态
+            asyncio.run_coroutine_threadsafe(
+                self.parent.toggle_favorite(song_path),
+                self.parent.loop
+            ).result()

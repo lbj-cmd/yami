@@ -12,7 +12,6 @@ import spotdl.utils
 import spotdl.utils.formatter
 import spotdl.utils.search
 import spotdl
-import vlc
 
 from .util import SUPPORTED_FORMATS
 
@@ -67,13 +66,8 @@ class TopBar(ctk.CTkFrame):
         if not self.parent.current_folder:
             return
 
-        # CLEAR PLAYLIST AND LISTBOX
-        self.parent.playlist_frame.song_list.delete(0, tk.END)
-        self.parent.media_list: vlc.MediaList = (
-            self.parent.vlc_instance.media_list_new()
-        )
-
-        self.parent.music_list_player.set_media_list(self.parent.media_list)
+        # CLEAR PLAYLIST
+        self.parent.playlist = []
 
         # FILTER MUSIC FILES
         for root, _, files in os.walk(self.parent.current_folder):
@@ -81,12 +75,17 @@ class TopBar(ctk.CTkFrame):
 
             for file in music_files:
                 file_path = os.path.join(root, file)
-                media = self.parent.vlc_instance.media_new(file_path)
-                artistname, title = self.get_name_and_title_of_media(media)
-                self.parent.media_list.add_media(media)
-                self.parent.playlist_frame.song_list.insert(
-                    "end", f"• {title} - {artistname}"
+                self.parent.playlist.append(file_path)
+                
+                # Add song to database
+                artist, title = self.get_name_and_title_of_file(file_path)
+                asyncio.run_coroutine_threadsafe(
+                    self.parent.db.add_song(file_path, title, artist),
+                    self.parent.loop
                 )
+
+        # UPDATE PLAYLIST FRAME
+        self.parent.playlist_frame.update_playlist(self.parent.playlist)
         os.chdir(self.parent.current_folder)
 
     def prompt_download(self):
@@ -98,23 +97,36 @@ class TopBar(ctk.CTkFrame):
         if song_url:
             self.parent.loop.create_task(self.download_song(song_url))
 
-    def get_name_and_title_of_media(self, media):
+    def get_name_and_title_of_file(self, file_path):
         """gets song artist name and title of song"""
 
         logging.debug("got song artist name + title of song for playlist")
         try:
-            if media.is_parsed():
-                return media.get_meta(1), media.get_meta(0)
-            else:
-                media.parse()
-                return media.get_meta(1), media.get_meta(0)
+            from mutagen import File
+            audio = File(file_path)
+            if audio is not None:
+                if hasattr(audio, 'tags') and audio.tags is not None:
+                    title = audio.tags.get('TIT2', audio.tags.get('TITLE', ['']))
+                    artist = audio.tags.get('TPE1', audio.tags.get('ARTIST', ['']))
+                    title_str = str(title[0]) if title else Path(file_path).stem
+                    artist_str = str(artist[0]) if artist else "Unknown Artist"
+                    return artist_str, title_str
+            return "Unknown Artist", Path(file_path).stem
         except Exception as e:
             logging.exception(e)
-            return ""
+            return "Unknown Artist", Path(file_path).stem
 
     async def download_song(self, song_url):
         try:
             logging.info("searching %s", song_url)
+
+            # 延迟初始化下载器
+            if self.parent.downloader is None:
+                try:
+                    self.parent.downloader = spotdl.Downloader(spotdl.DownloaderOptions(threads=2))
+                except Exception as e:
+                    logging.error("Failed to initialize downloader: %s", e)
+                    return
 
             # ASYNC UNTIL DOWNLOAD GETS OVER
             song, path = await asyncio.ensure_future(
