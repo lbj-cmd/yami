@@ -14,7 +14,6 @@ import spotdl.utils.search
 import spotdl
 
 from .util import SUPPORTED_FORMATS
-from .tag_editor import BatchTagEditor
 
 
 class TopBar(ctk.CTkFrame):
@@ -54,23 +53,7 @@ class TopBar(ctk.CTkFrame):
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
         self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        
-        # Add tag editor button
-        self.tag_editor_btn = ctk.CTkButton(
-            self,
-            command=self.open_tag_editor,
-            text="Tag Editor",
-            font=("roboto", 15),
-            width=70,
-            image=parent.music_icon,
-        )
-        self.tag_editor_btn.grid(row=0, column=4, sticky="w", pady=5, padx=10)
-        
         logging.debug("initialized topbar")
-    
-    def open_tag_editor(self):
-        """Open the batch tag editor window"""
-        BatchTagEditor(self.parent)
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
