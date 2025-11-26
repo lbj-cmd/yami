@@ -48,20 +48,11 @@ class TopBar(ctk.CTkFrame):
             width=70,
             image=parent.music_icon,
         )
-        
-        self.lyrics_editor_button = ctk.CTkButton(
-            self,
-            text="制作歌词",
-            font=("roboto", 15),
-            width=100,
-            command=self.open_lyrics_editor,
-        )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.lyrics_editor_button.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
+        self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
 
     # FOR ADDING SONGS TO PLAYLIST
@@ -161,7 +152,3 @@ class TopBar(ctk.CTkFrame):
         self.parent.playlist_frame.song_list.insert(
             "end", f"• {Path(self.downloaded_song_path).stem}"
         )
-    
-    def open_lyrics_editor(self):
-        """Open the immersive lyrics editor"""
-        self.parent.enter_lyrics_editor_mode()
