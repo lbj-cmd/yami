@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import tkinter as tk
-from tkinter import filedialog, simpledialog, messagebox
+from tkinter import filedialog, simpledialog
 import os
 from pathlib import Path
 
@@ -14,7 +14,6 @@ import spotdl.utils.search
 import spotdl
 
 from .util import SUPPORTED_FORMATS
-from .tag_editor import BatchTagEditor
 
 
 class TopBar(ctk.CTkFrame):
@@ -42,30 +41,38 @@ class TopBar(ctk.CTkFrame):
             command=self.prompt_download,
         )
 
-        # 标签编辑器按钮
-        self.tag_editor_btn = ctk.CTkButton(
+        self.audio_3d_button = ctk.CTkButton(
             self,
-            text="Tag Editor",
+            text="3D音效",
             font=("roboto", 15),
             width=70,
-            command=self._open_tag_editor,
+            image=parent.music_icon,
+            command=self.toggle_3d_audio,
         )
-        
+
         self.yami = ctk.CTkButton(
             self,
             text="About",
             font=("roboto", 15),
             width=70,
             image=parent.music_icon,
-            command=self._show_about,
         )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.tag_editor_btn.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.audio_3d_button.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
+    
+    def toggle_3d_audio(self):
+        """切换3D音频模式"""
+        self.parent.audio_mixer_3d.toggle_3d_mode()
+        # 更新按钮文本
+        if self.parent.audio_mixer_3d.is_3d_mode:
+            self.audio_3d_button.configure(text="2D模式")
+        else:
+            self.audio_3d_button.configure(text="3D音效")
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
@@ -122,24 +129,6 @@ class TopBar(ctk.CTkFrame):
         except Exception as e:
             logging.exception(e)
             return "Unknown Artist", Path(file_path).stem
-
-    def _open_tag_editor(self):
-        """打开批量标签编辑器"""
-        try:
-            self.tag_editor = BatchTagEditor(self)
-            self.tag_editor.transient(self)
-            self.tag_editor.grab_set()
-            logging.debug("opened batch tag editor")
-        except Exception as e:
-            logging.exception(f"Error opening tag editor: {e}")
-            messagebox.showerror("Error", "Failed to open tag editor")
-
-    def _show_about(self):
-        """显示关于信息"""
-        messagebox.showinfo(
-            "About",
-            "9yami Music Player\n\nVersion 1.0\nA modern music player built with Python and CustomTkinter"
-        )
 
     async def download_song(self, song_url):
         try:

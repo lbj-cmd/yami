@@ -23,6 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .audio_mixer_3d import AudioMixer3D
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -314,6 +315,7 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
+        self.audio_mixer_3d = AudioMixer3D(self)
 
     def setup_keybindings(self):
         """
@@ -336,6 +338,8 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+        # 3D音频混音台默认隐藏
+        self.audio_mixer_3d.pack_forget()
         logging.debug("widgets packed")
 
     def update_loop(self):
