@@ -14,7 +14,7 @@ class ControlBar(ctk.CTkFrame):
         self,
         parent,
     ):
-        super().__init__(parent, corner_radius=10, fg_color="#121212", height=60)
+        super().__init__(parent, corner_radius=10, fg_color="#121212")
 
         # SETUP
         self.parent = parent
@@ -25,37 +25,6 @@ class ControlBar(ctk.CTkFrame):
         self.title_max_chars = 40
 
         # WIDGETS
-        self.music_title_label = ctk.CTkLabel(
-            self,
-            text="",
-            font=("roboto", 12),
-            fg_color="#121212",
-            width=20,
-            anchor="w",
-            text_color="#e0e0e0",
-        )
-        self.playback_label = ctk.CTkLabel(
-            self, text="0:00 / 0:00", font=("roboto", 12), fg_color="#121212"
-        )
-        
-        # Loop mode switch
-        self.loop_mode_switch = ctk.CTkSwitch(
-            self,
-            text="Loop Mode",
-            font=("roboto", 12),
-            command=self.toggle_loop_mode,
-            fg_color="#4a4d50",
-            progress_color="#3aafa9"
-        )
-        
-        self.prev_button = ctk.CTkButton(
-            self,
-            text="",
-            width=BUTTON_WIDTH,
-            corner_radius=10,
-            command=self.parent.play_previous,
-            image=self.prev_icon,
-        )
         self.play_button = ctk.CTkButton(
             self,
             command=self.play_pause,
@@ -73,6 +42,26 @@ class ControlBar(ctk.CTkFrame):
             corner_radius=10,
             image=self.next_icon,
         )
+        self.prev_button = ctk.CTkButton(
+            self,
+            text="",
+            width=BUTTON_WIDTH,
+            corner_radius=10,
+            command=self.parent.play_previous,
+            image=self.prev_icon,
+        )
+        self.music_title_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=("roboto", 12),
+            fg_color="#121212",
+            width=20,
+            anchor="w",
+            text_color="#e0e0e0",
+        )
+        self.playback_label = ctk.CTkLabel(
+            self, text="0:00 / 0:00", font=("roboto", 12), fg_color="#121212"
+        )
 
         # PLACEMENT
         self.grid_columnconfigure(0, weight=1)
@@ -80,17 +69,13 @@ class ControlBar(ctk.CTkFrame):
         self.grid_columnconfigure(2, weight=0)
         self.grid_columnconfigure(3, weight=0)
         self.grid_columnconfigure(4, weight=0)
-        self.grid_columnconfigure(5, weight=0)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
 
         # PLACEMENT
-        self.music_title_label.grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        self.playback_label.grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        self.loop_mode_switch.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=10, pady=5)
-        self.prev_button.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=5, pady=5)
-        self.play_button.grid(row=0, column=3, rowspan=2, sticky="nsew", padx=5, pady=5)
-        self.next_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=5, pady=5)
+        self.music_title_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
+        self.playback_label.grid(row=0, column=1, sticky="w", padx=5, pady=10)
+        self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
+        self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
+        self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
@@ -115,12 +100,6 @@ class ControlBar(ctk.CTkFrame):
         else:
             self.play_button.configure(image=self.play_icon)
             logging.debug("updated play button to play")
-    
-    def toggle_loop_mode(self):
-        """Toggle loop mode on/off"""
-        self.parent.toggle_loop_mode()
-        loop_mode = self.parent.loop_mode
-        logging.debug(f"loop mode {'enabled' if loop_mode else 'disabled'}")
 
     # TRUNCATOR
     def set_music_title(self, title, artist):

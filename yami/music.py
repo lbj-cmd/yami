@@ -23,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .waveform_editor import WaveformEditor
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -49,7 +48,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        self.loop_mode = False
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -78,34 +76,16 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
-            
-            # Check loop mode logic
-            if self.loop_mode and hasattr(self, 'waveform_editor'):
-                current_play_time = current_time - self.song_start_time
-                if current_play_time >= self.waveform_editor.end_point:
-                    # Jump back to start point
-                    self.jump_to_time(self.waveform_editor.start_point)
-                else:
-                    # Update progress and UI
-                    self.bottom_frame.progress_bar.set(song_position)
-                    self.control_bar.playback_label.configure(
-                        text=make_time_string(int(current_play_time), self.song_length)
-                    )
-                    # Update lyrics if loop mode is off or showing lyrics
-                    if not self.loop_mode:
-                        self.lyrics_frame.update_lyrics(current_play_time)
+            if song_position >= 1.0:
+                self.play_next_song()
             else:
-                # Normal playback logic
-                if song_position >= 1.0:
-                    self.play_next_song()
-                else:
-                    self.bottom_frame.progress_bar.set(song_position)
-                    self.control_bar.playback_label.configure(
-                        text=make_time_string(int(song_position * self.song_length), self.song_length)
-                    )
-                    # 更新歌词显示
-                    current_play_time = (current_time - self.song_start_time)
-                    self.lyrics_frame.update_lyrics(current_play_time)
+                self.bottom_frame.progress_bar.set(song_position)
+                self.control_bar.playback_label.configure(
+                    text=make_time_string(int(song_position * self.song_length), self.song_length)
+                )
+                # 更新歌词显示
+                current_play_time = (current_time - self.song_start_time)
+                self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
     def load_and_play_song(self, index):
@@ -134,13 +114,6 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
-            
-            # Update waveform editor with new song length and waveform
-            if hasattr(self, 'waveform_editor'):
-                self.waveform_editor.set_song_length(self.song_length)
-                self.waveform_editor.reset_loop_points()
-                # Generate waveform from audio file
-                self.waveform_editor.generate_waveform_from_audio(song_path)
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -341,15 +314,12 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.waveform_editor = WaveformEditor(self)
 
     def setup_keybindings(self):
         """
         :param `<F9>`: play next
         :param `<F8>`: play previous
         :param `<Space>`:  play or pause
-        :param `<Left>`:  adjust selected loop point left by 0.1s
-        :param `<Right>`:  adjust selected loop point right by 0.1s
         """
 
         self.bind("<F10>", self.play_next_song)
@@ -357,8 +327,6 @@ class MusicPlayer(ctk.CTk):
         self.bind("<F9>", self.control_bar.play_pause)
         self.bind("<space>", self.control_bar.play_pause)
         self.bind("<Control-o>", self.topbar.choose_folder)
-        self.bind("<Left>", self.adjust_loop_point_left)
-        self.bind("<Right>", self.adjust_loop_point_right)
         logging.debug("setup keybinds")
 
     def setup_widget_packing(self):
@@ -368,67 +336,12 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-        # Waveform editor is initially hidden
-        self.waveform_editor.pack_forget()
         logging.debug("widgets packed")
 
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
         self.after(1000, self.update_loop)
-    
-    def toggle_loop_mode(self):
-        """Toggle loop mode and switch between lyrics and waveform editor"""
-        self.loop_mode = not self.loop_mode
-        
-        if self.loop_mode:
-            # Hide lyrics frame and show waveform editor
-            self.lyrics_frame.pack_forget()
-            self.waveform_editor.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            # Reset loop points to default
-            self.waveform_editor.reset_loop_points()
-            # Start waveform editor update loop
-            self.waveform_editor.update()
-        else:
-            # Hide waveform editor and show lyrics frame
-            self.waveform_editor.pack_forget()
-            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            # Stop waveform editor update loop
-            self.waveform_editor.stop_update()
-    
-    def adjust_loop_point_left(self, event=None):
-        """Adjust selected loop point left by 0.1 seconds"""
-        if self.loop_mode and hasattr(self, 'waveform_editor'):
-            self.waveform_editor.adjust_selected_point(-0.1)
-    
-    def adjust_loop_point_right(self, event=None):
-        """Adjust selected loop point right by 0.1 seconds"""
-        if self.loop_mode and hasattr(self, 'waveform_editor'):
-            self.waveform_editor.adjust_selected_point(0.1)
-    
-    def jump_to_time(self, target_time):
-        """Jump to a specific time in the song"""
-        if self.is_playing:
-            # 使用pygame的set_pos方法跳转到指定位置
-            pygame.mixer.music.set_pos(target_time)
-            # 更新开始时间以保持时间计算准确
-            self.song_start_time = time.time() - target_time
-            # Update progress bar
-            song_position = target_time / self.song_length
-            self.bottom_frame.progress_bar.set(song_position)
-            # Update playback label
-            self.control_bar.playback_label.configure(
-                text=make_time_string(int(target_time), self.song_length)
-            )
-            # Update lyrics if not in loop mode
-            if not self.loop_mode:
-                self.lyrics_frame.update_lyrics(target_time)
-    
-    def get_current_time(self):
-        """Get the current playback time"""
-        if self.is_playing:
-            return time.time() - self.song_start_time
-        return 0.0
 
 
 if __name__ == "__main__":
