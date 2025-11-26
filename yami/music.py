@@ -8,7 +8,6 @@ import logging
 import time
 import io
 import re
-from .database import MusicDatabase
 
 
 from mutagen import File, id3
@@ -22,7 +21,7 @@ from .topbar import TopBar
 from .playlist import PlaylistFrame
 from .control import ControlBar
 from .cover_art import CoverArtFrame
-from .progress import BottomFrame
+from .waveform import WaveformFrame
 from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
@@ -49,9 +48,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        
-        # Database initialization
-        self.db = MusicDatabase()
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -81,15 +77,9 @@ class MusicPlayer(ctk.CTk):
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
             if song_position >= 1.0:
-                # 歌曲播放结束，更新播放次数并播放下一首
-                if self.playlist and self.current_song_index < len(self.playlist):
-                    current_song_path = self.playlist[self.current_song_index]
-                    self.db.increment_play_count(current_song_path)
-                    # 更新常听歌曲列表
-                    self.playlist_frame.update_top_songs()
                 self.play_next_song()
             else:
-                self.bottom_frame.progress_bar.set(song_position)
+                self.bottom_frame.update_playhead(song_position * self.song_length)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
@@ -113,12 +103,6 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # 获取歌曲元数据并更新数据库
-            title = self.get_song_title()
-            artist = self.get_song_artist()
-            album = self.get_song_album()
-            self.db.add_or_update_song(song_path, title, artist, album, int(self.song_length))
-            
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.play()
             self.is_playing = True
@@ -127,12 +111,12 @@ class MusicPlayer(ctk.CTk):
             # CHANGE INFO
             self.change_info()
             
-            # Update favorite button state
-            self.control_bar.update_favorite_button()
-            
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
+            
+            # 加载波形数据
+            self.bottom_frame.load_audio(song_path)
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -237,19 +221,6 @@ class MusicPlayer(ctk.CTk):
             logging.exception(e)
             return "Unknown Artist"
     
-    def get_song_album(self) -> str:
-        try:
-            song_path = self.playlist[self.current_song_index]
-            audio = File(song_path)
-            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
-                album = audio.tags.get('TALB', audio.tags.get('ALBUM', ['']))
-                if album:
-                    return str(album[0])
-            return "Unknown Album"
-        except Exception as e:
-            logging.exception(e)
-            return "Unknown Album"
-    
     def parse_lrc(self, lrc_content: str) -> list:
         """解析LRC格式的歌词内容"""
         lyrics = []
@@ -312,6 +283,25 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             return (time.time() - self.song_start_time) / self.song_length
         return 0.0
+    
+    def get_position(self) -> float:
+        """Get current playback position in seconds"""
+        if self.is_playing:
+            return time.time() - self.song_start_time
+        return 0.0
+    
+    def set_position(self, position: float):
+        """Set playback position in seconds"""
+        if self.is_playing:
+            self.song_start_time = time.time() - position
+        else:
+            self.song_start_time = -position
+        self.current_position = position
+    
+    def play(self):
+        """Start playback"""
+        if not self.is_playing and self.playlist:
+            self.load_and_play_song(self.current_song_index)
 
     def round_corners(self, image, radius) -> Image.Image:
         """Rounds Album Cover"""
@@ -343,7 +333,7 @@ class MusicPlayer(ctk.CTk):
         self.topbar = TopBar(self)
         self.control_bar = ControlBar(self)
         self.playlist_frame = PlaylistFrame(self)
-        self.bottom_frame = BottomFrame(self)
+        self.bottom_frame = WaveformFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
 
