@@ -48,9 +48,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        self.loop_mode = False
-        self.loop_start = 0.0  # in seconds
-        self.loop_end = 0.0    # in seconds
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -78,28 +75,17 @@ class MusicPlayer(ctk.CTk):
     def update(self, event=None):
         if self.is_playing:
             current_time = time.time()
-            song_position = (current_time - self.song_start_time)
-            
-            # Check for loop
-            if self.loop_mode and song_position >= self.loop_end:
-                # Jump back to loop start
-                pygame.mixer.music.set_pos(self.loop_start)
-                self.song_start_time = time.time() - self.loop_start
-                song_position = self.loop_start
-                logging.debug("jumped to loop start")
-            
-            if song_position >= self.song_length:
+            song_position = (current_time - self.song_start_time) / self.song_length
+            if song_position >= 1.0:
                 self.play_next_song()
             else:
-                progress = song_position / self.song_length
-                self.bottom_frame.progress_bar.set(progress)
+                self.bottom_frame.progress_bar.set(song_position)
                 self.control_bar.playback_label.configure(
-                    text=make_time_string(int(song_position), self.song_length)
+                    text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
-                # Update lyrics display if not in loop mode
-                if not self.loop_mode:
-                    current_play_time = (current_time - self.song_start_time)
-                    self.lyrics_frame.update_lyrics(current_play_time)
+                # 更新歌词显示
+                current_play_time = (current_time - self.song_start_time)
+                self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
     def load_and_play_song(self, index):
@@ -166,29 +152,6 @@ class MusicPlayer(ctk.CTk):
         # UPDATE SELECTION
         self.playlist_frame.song_list.selection_clear(0, tk.END)
         self.playlist_frame.song_list.select_set(self.current_song_index)
-
-    def toggle_loop_mode(self):
-        """Toggles loop mode and updates UI"""
-        self.loop_mode = not self.loop_mode
-        if self.loop_mode:
-            # Initialize loop points if not set
-            if self.loop_end == 0.0:
-                self.loop_start = 0.0
-                self.loop_end = self.song_length
-            # Hide lyrics frame and show loop editor
-            self.lyrics_frame.pack_forget()
-            # Create loop editor frame if not exists
-            if not hasattr(self, 'loop_editor_frame'):
-                from .loop_editor import LoopEditorFrame
-                self.loop_editor_frame = LoopEditorFrame(self)
-            self.loop_editor_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            logging.debug("loop mode enabled")
-        else:
-            # Hide loop editor and show lyrics frame
-            if hasattr(self, 'loop_editor_frame'):
-                self.loop_editor_frame.pack_forget()
-            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            logging.debug("loop mode disabled")
 
     def get_song_length(self) -> int:
         logging.debug("got song length")
@@ -342,14 +305,6 @@ class MusicPlayer(ctk.CTk):
         self.next_icon = ctk.CTkImage(Image.open("yami/data/skip_next.png"))
         self.folder_icon = ctk.CTkImage(Image.open("yami/data/folder.png"))
         self.music_icon = ctk.CTkImage(Image.open("yami/data/music.png"))
-        # Add loop icons
-        try:
-            self.loop_icon = ctk.CTkImage(Image.open("yami/data/loop.png"))
-            self.loop_active_icon = ctk.CTkImage(Image.open("yami/data/loop_active.png"))
-        except:
-            # If loop icons don't exist, use text instead
-            self.loop_icon = None
-            self.loop_active_icon = None
         logging.debug("icons setup")
 
     def setup_frames(self):
