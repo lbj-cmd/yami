@@ -90,8 +90,7 @@ class MusicPlayer(ctk.CTk):
 
     def load_and_play_song(self, index):
         if self.is_playing:
-            if hasattr(self, 'sound'):
-                self.sound.stop()
+            pygame.mixer.music.stop()
         
         self.current_song_index = index
         song_path = self.playlist[index]
@@ -104,13 +103,10 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # 使用pygame.mixer.Sound而不是pygame.mixer.music来支持立体声控制
-            self.sound = pygame.mixer.Sound(song_path)
-            self.channel = pygame.mixer.find_channel()
-            if self.channel:
-                self.channel.play(self.sound, loops=-1)
-                self.is_playing = True
-                self.song_start_time = time.time()
+            pygame.mixer.music.load(song_path)
+            pygame.mixer.music.play()
+            self.is_playing = True
+            self.song_start_time = time.time()
             
             # CHANGE INFO
             self.change_info()
