@@ -22,8 +22,6 @@ class ControlBar(ctk.CTkFrame):
         self.play_icon = parent.play_icon
         self.prev_icon = parent.prev_icon
         self.next_icon = parent.next_icon
-        self.loop_icon = parent.loop_icon
-        self.loop_active_icon = parent.loop_active_icon
         self.title_max_chars = 40
 
         # WIDGETS
@@ -52,15 +50,6 @@ class ControlBar(ctk.CTkFrame):
             command=self.parent.play_previous,
             image=self.prev_icon,
         )
-        self.loop_button = ctk.CTkButton(
-            self,
-            text="",
-            width=40,
-            height=40,
-            corner_radius=10,
-            command=self.toggle_loop_mode,
-            image=self.loop_icon
-        )
         self.music_title_label = ctk.CTkLabel(
             self,
             text="",
@@ -80,7 +69,6 @@ class ControlBar(ctk.CTkFrame):
         self.grid_columnconfigure(2, weight=0)
         self.grid_columnconfigure(3, weight=0)
         self.grid_columnconfigure(4, weight=0)
-        self.grid_columnconfigure(5, weight=0)
 
         # PLACEMENT
         self.music_title_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
@@ -88,7 +76,6 @@ class ControlBar(ctk.CTkFrame):
         self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
         self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
         self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
-        self.loop_button.grid(row=0, column=5, sticky="nsew", padx=5, pady=10)
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
@@ -113,16 +100,6 @@ class ControlBar(ctk.CTkFrame):
         else:
             self.play_button.configure(image=self.play_icon)
             logging.debug("updated play button to play")
-
-    def toggle_loop_mode(self):
-        """Toggles loop mode on and off"""
-        self.parent.toggle_loop_mode()
-        if self.parent.loop_mode:
-            self.loop_button.configure(image=self.loop_active_icon)
-            logging.debug("loop mode enabled")
-        else:
-            self.loop_button.configure(image=self.loop_icon)
-            logging.debug("loop mode disabled")
 
     # TRUNCATOR
     def set_music_title(self, title, artist):
