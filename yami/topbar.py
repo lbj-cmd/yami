@@ -41,15 +41,6 @@ class TopBar(ctk.CTkFrame):
             command=self.prompt_download,
         )
 
-        self.audio_3d_button = ctk.CTkButton(
-            self,
-            text="3D音效",
-            font=("roboto", 15),
-            width=70,
-            image=parent.music_icon,
-            command=self.toggle_3d_audio,
-        )
-
         self.yami = ctk.CTkButton(
             self,
             text="About",
@@ -61,18 +52,8 @@ class TopBar(ctk.CTkFrame):
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.audio_3d_button.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
+        self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
-    
-    def toggle_3d_audio(self):
-        """切换3D音频模式"""
-        self.parent.audio_mixer_3d.toggle_3d_mode()
-        # 更新按钮文本
-        if self.parent.audio_mixer_3d.is_3d_mode:
-            self.audio_3d_button.configure(text="2D模式")
-        else:
-            self.audio_3d_button.configure(text="3D音效")
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
@@ -85,21 +66,18 @@ class TopBar(ctk.CTkFrame):
         if not self.parent.current_folder:
             return
 
-        # CLEAR PLAYLIST AND LISTBOX
-        self.parent.playlist_frame.song_list.delete(0, tk.END)
+        # CLEAR PLAYLIST AND UPDATE UI
         self.parent.playlist = []
+        self.parent.playlist_frame.clear_playlist()
 
         # FILTER MUSIC FILES
+        music_files = []
         for root, _, files in os.walk(self.parent.current_folder):
-            music_files = [file for file in files if file.endswith(SUPPORTED_FORMATS)]
-
-            for file in music_files:
-                file_path = os.path.join(root, file)
-                artistname, title = self.get_name_and_title_of_file(file_path)
-                self.parent.playlist.append(file_path)
-                self.parent.playlist_frame.song_list.insert(
-                    "end", f"• {title} - {artistname}"
-                )
+            music_files.extend([os.path.join(root, file) for file in files if file.endswith(SUPPORTED_FORMATS)])
+        
+        # Update playlist UI with new songs
+        self.parent.playlist_frame.groups[0].update_songs(music_files)
+        self.parent.playlist_frame.update_playlist_data()
         os.chdir(self.parent.current_folder)
 
     def prompt_download(self):

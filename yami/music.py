@@ -23,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .audio_mixer_3d import AudioMixer3D
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -138,10 +137,6 @@ class MusicPlayer(ctk.CTk):
             self.load_and_play_song(self.current_song_index + 1)
         else:
             self.load_and_play_song(0)  # 循环播放
-        
-        # UPDATE SELECTION
-        self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
@@ -149,10 +144,6 @@ class MusicPlayer(ctk.CTk):
             self.load_and_play_song(self.current_song_index - 1)
         else:
             self.load_and_play_song(len(self.playlist) - 1)  # 循环播放
-        
-        # UPDATE SELECTION
-        self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def get_song_length(self) -> int:
         logging.debug("got song length")
@@ -315,7 +306,6 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.audio_mixer_3d = AudioMixer3D(self)
 
     def setup_keybindings(self):
         """
@@ -338,8 +328,6 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-        # 3D音频混音台默认隐藏
-        self.audio_mixer_3d.pack_forget()
         logging.debug("widgets packed")
 
     def update_loop(self):
