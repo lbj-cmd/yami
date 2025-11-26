@@ -9,9 +9,7 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 
 def entry():
-    print("Starting entry function")
     app = MusicPlayer()
-    print("MusicPlayer created, starting mainloop")
     app.mainloop()
 
 

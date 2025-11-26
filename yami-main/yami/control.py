@@ -3,6 +3,7 @@
 import tkinter as tk
 import logging
 import customtkinter as ctk
+import pygame
 from .util import BUTTON_WIDTH
 
 
@@ -81,9 +82,11 @@ class ControlBar(ctk.CTkFrame):
         """Plays Or Pauses The Music"""
 
         if self.parent.is_playing:
+            pygame.mixer.music.pause()
             self.parent.is_playing = False
             logging.debug("paused")
         else:
+            pygame.mixer.music.unpause()
             self.parent.is_playing = True
             logging.debug("resumed")
         self.update_play_button()

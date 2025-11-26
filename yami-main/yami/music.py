@@ -1,6 +1,5 @@
 """Root Widget"""
 
-import warnings
 from pathlib import Path
 import tkinter as tk
 import tempfile
@@ -10,22 +9,19 @@ import time
 import io
 import re
 
-# Suppress numpy RuntimeWarnings
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
-
 
 from mutagen import File, id3
 import customtkinter as ctk
 from PIL import Image, ImageDraw
-# import spotdl
-# import pygame
+import spotdl
+import pygame
 
 
 from .topbar import TopBar
 from .playlist import PlaylistFrame
 from .control import ControlBar
 from .cover_art import CoverArtFrame
-# from .waveform_progress import WaveformProgressBar
+from .progress import BottomFrame
 from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
@@ -37,22 +33,15 @@ ctk.set_appearance_mode("dark")
 class MusicPlayer(ctk.CTk):
     """ROOT"""
 
-    def __init__(self: ctk.CTk):
+    def __init__(self: ctk.CTk, loop=None):
         """ROOT INIT"""
-        print("Initializing MusicPlayer")
         super().__init__()
 
         # CONFIG
-        print("Setting window geometry and title")
         self.geometry(GEOMETRY)
         self.title(TITLE)
-        self.update_idletasks()
-        self.lift()
-        self.attributes('-topmost', True)
-        self.after_idle(self.attributes, '-topmost', False)
 
         # STATE
-        print("Setting initial state")
         self.playlist = []
         self.current_folder = ""
         self.current_song_index = 0
@@ -60,12 +49,12 @@ class MusicPlayer(ctk.CTk):
         self.song_start_time = 0
         self.song_length = 0
 
-        # print("Initializing Spotify client")
-        # self.downloader = None  # 延迟初始化
-        # spotdl.SpotifyClient.init(
-        #     "5f573c9620494bae87890c0f08a60293",
-        #     "212476d9b0f3472eaa762d90b19b0ba8",
-        # )
+        self.loop = loop if loop is not None else asyncio.new_event_loop()
+        self.downloader = None  # 延迟初始化
+        spotdl.SpotifyClient.init(
+            "5f573c9620494bae87890c0f08a60293",
+            "212476d9b0f3472eaa762d90b19b0ba8",
+        )
         
         # 歌词相关
         self.lyrics = []  # 存储歌词和时间戳的列表 [(time, lyric), ...]
@@ -74,13 +63,14 @@ class MusicPlayer(ctk.CTk):
         self.initialize_pygame()
 
         # TKINTER SETUP
-        # self.setup_icons()
-        # self.setup_frames()
-        # self.setup_widget_packing()
+        self.setup_icons()
+        self.setup_frames()
+        self.setup_widget_packing()
 
-        # self.setup_keybindings()
+        self.setup_keybindings()
 
-        # self.after(EVENT_INTERVAL, self.update)
+        self.update_loop()
+        self.after(EVENT_INTERVAL, self.update)
 
     def update(self, event=None):
         if self.is_playing:
@@ -89,7 +79,7 @@ class MusicPlayer(ctk.CTk):
             if song_position >= 1.0:
                 self.play_next_song()
             else:
-                self.bottom_frame.update_progress(song_position)
+                self.bottom_frame.progress_bar.set(song_position)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
@@ -124,9 +114,6 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
-            
-            # 加载波形
-            self.bottom_frame.load_waveform(song_path)
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -308,7 +295,7 @@ class MusicPlayer(ctk.CTk):
 
     def initialize_pygame(self):
         """Initialize pygame mixer for audio playback"""
-        # pygame.mixer.init()
+        pygame.mixer.init()
         logging.debug("initialized pygame mixer")
 
     def setup_icons(self):
@@ -324,7 +311,7 @@ class MusicPlayer(ctk.CTk):
         self.topbar = TopBar(self)
         self.control_bar = ControlBar(self)
         self.playlist_frame = PlaylistFrame(self)
-        self.bottom_frame = WaveformProgressBar(self)
+        self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
 
@@ -351,11 +338,12 @@ class MusicPlayer(ctk.CTk):
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
 
-
+    def update_loop(self):
+        self.loop.call_soon(self.loop.stop)
+        self.loop.run_forever()
+        self.after(1000, self.update_loop)
 
 
 if __name__ == "__main__":
     music_player = MusicPlayer()
-    print("Mainloop started")
     music_player.mainloop()
-    print("Mainloop exited")
