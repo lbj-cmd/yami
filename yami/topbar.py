@@ -66,8 +66,7 @@ class TopBar(ctk.CTkFrame):
         if not self.parent.current_folder:
             return
 
-        # CLEAR PLAYLIST AND LISTBOX
-        self.parent.playlist_frame.song_list.delete(0, tk.END)
+        # CLEAR PLAYLIST
         self.parent.playlist = []
 
         # FILTER MUSIC FILES
@@ -76,11 +75,10 @@ class TopBar(ctk.CTkFrame):
 
             for file in music_files:
                 file_path = os.path.join(root, file)
-                artistname, title = self.get_name_and_title_of_file(file_path)
                 self.parent.playlist.append(file_path)
-                self.parent.playlist_frame.song_list.insert(
-                    "end", f"• {title} - {artistname}"
-                )
+        
+        # Update playlist display using the new method
+        self.parent.playlist_frame.update_playlist(self.parent.playlist)
         os.chdir(self.parent.current_folder)
 
     def prompt_download(self):
