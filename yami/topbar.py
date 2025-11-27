@@ -14,7 +14,6 @@ import spotdl.utils.search
 import spotdl
 
 from .util import SUPPORTED_FORMATS
-from .database import db
 
 
 class TopBar(ctk.CTkFrame):
@@ -68,7 +67,7 @@ class TopBar(ctk.CTkFrame):
             return
 
         # CLEAR PLAYLIST AND LISTBOX
-        self.parent.playlist_frame.delete_all_songs()
+        self.parent.playlist_frame.song_list.delete(0, tk.END)
         self.parent.playlist = []
 
         # FILTER MUSIC FILES
@@ -78,18 +77,10 @@ class TopBar(ctk.CTkFrame):
             for file in music_files:
                 file_path = os.path.join(root, file)
                 artistname, title = self.get_name_and_title_of_file(file_path)
-                
-                # 检查歌曲是否被收藏
-                is_favorite = db.get_favorite_state(file_path)
-                favorite_mark = "♥ " if is_favorite else "• "
-                
                 self.parent.playlist.append(file_path)
-                self.parent.playlist_frame.insert_song(
-                    f"{favorite_mark}{title} - {artistname}"
+                self.parent.playlist_frame.song_list.insert(
+                    "end", f"• {title} - {artistname}"
                 )
-        
-        # 更新常听歌曲列表
-        self.parent.playlist_frame.update_top_songs()
         os.chdir(self.parent.current_folder)
 
     def prompt_download(self):
@@ -158,9 +149,6 @@ class TopBar(ctk.CTkFrame):
             logging.error(e)
 
         self.parent.playlist.append(self.downloaded_song_path)
-        self.parent.playlist_frame.insert_song(
-            f"• {Path(self.downloaded_song_path).stem}"
+        self.parent.playlist_frame.song_list.insert(
+            "end", f"• {Path(self.downloaded_song_path).stem}"
         )
-        
-        # 更新常听歌曲列表
-        self.parent.playlist_frame.update_top_songs()

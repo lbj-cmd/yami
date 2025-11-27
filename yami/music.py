@@ -24,8 +24,6 @@ from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
-from .database import db
-import threading
 
 
 ctk.set_default_color_theme("yami/data/theme.json")
@@ -81,7 +79,7 @@ class MusicPlayer(ctk.CTk):
             if song_position >= 1.0:
                 self.play_next_song()
             else:
-                self.bottom_frame.progress_bar.set(song_position)
+                self.bottom_frame.update_position(song_position)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
@@ -117,13 +115,9 @@ class MusicPlayer(ctk.CTk):
             self.load_lyrics()
             self.current_lyric_index = -1
             
-            # 更新数据库中的歌曲信息
-            title = self.get_song_title()
-            artist = self.get_song_artist()
-            threading.Thread(target=db.add_or_update_song, args=(song_path, title, artist)).start()
-            
-            # 更新收藏按钮状态
-            self.control_bar.update_favorite_button()
+            # 加载波形数据
+            logging.debug("Calling load_current_song_waveform")
+            self.bottom_frame.load_current_song_waveform()
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -143,12 +137,6 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
-        
-        # 更新当前歌曲的播放次数
-        if self.playlist and self.current_song_index < len(self.playlist):
-            current_song_path = self.playlist[self.current_song_index]
-            threading.Thread(target=db.increment_play_count, args=(current_song_path,)).start()
-        
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
