@@ -21,7 +21,7 @@ from .topbar import TopBar
 from .playlist import PlaylistFrame
 from .control import ControlBar
 from .cover_art import CoverArtFrame
-from .waveform import WaveformFrame
+from .progress import BottomFrame
 from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
@@ -79,7 +79,7 @@ class MusicPlayer(ctk.CTk):
             if song_position >= 1.0:
                 self.play_next_song()
             else:
-                self.bottom_frame.update_playhead(song_position * self.song_length)
+                self.bottom_frame.progress_bar.set(song_position)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
@@ -114,9 +114,6 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
-            
-            # 加载波形数据
-            self.bottom_frame.load_audio(song_path)
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -283,25 +280,6 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             return (time.time() - self.song_start_time) / self.song_length
         return 0.0
-    
-    def get_position(self) -> float:
-        """Get current playback position in seconds"""
-        if self.is_playing:
-            return time.time() - self.song_start_time
-        return 0.0
-    
-    def set_position(self, position: float):
-        """Set playback position in seconds"""
-        if self.is_playing:
-            self.song_start_time = time.time() - position
-        else:
-            self.song_start_time = -position
-        self.current_position = position
-    
-    def play(self):
-        """Start playback"""
-        if not self.is_playing and self.playlist:
-            self.load_and_play_song(self.current_song_index)
 
     def round_corners(self, image, radius) -> Image.Image:
         """Rounds Album Cover"""
@@ -333,7 +311,7 @@ class MusicPlayer(ctk.CTk):
         self.topbar = TopBar(self)
         self.control_bar = ControlBar(self)
         self.playlist_frame = PlaylistFrame(self)
-        self.bottom_frame = WaveformFrame(self)
+        self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
 
