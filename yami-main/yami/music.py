@@ -23,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .lyrics_editor import LyricsEditor
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -69,9 +68,6 @@ class MusicPlayer(ctk.CTk):
         self.setup_widget_packing()
 
         self.setup_keybindings()
-        
-        # Lyrics editor mode state
-        self.is_lyrics_editor_mode = False
 
         self.update_loop()
         self.after(EVENT_INTERVAL, self.update)
@@ -284,77 +280,6 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             return (time.time() - self.song_start_time) / self.song_length
         return 0.0
-    
-    def get_current_play_time(self) -> float:
-        """Get current playback time in seconds"""
-        if self.is_playing:
-            return time.time() - self.song_start_time
-        return 0.0
-    
-    def seek_to_time(self, timestamp: float):
-        """Seek to a specific time in the song"""
-        if not self.playlist or self.current_song_index >= len(self.playlist):
-            return
-            
-        if self.is_playing:
-            pygame.mixer.music.stop()
-            
-        # Load the song again and seek to the specified time
-        song_path = self.playlist[self.current_song_index]
-        pygame.mixer.music.load(song_path)
-        pygame.mixer.music.play(start=timestamp)
-        self.is_playing = True
-        self.song_start_time = time.time() - timestamp
-        
-        # Update UI
-        self.control_bar.update_play_button()
-    
-    def enter_lyrics_editor_mode(self):
-        """Enter immersive lyrics editor mode"""
-        if self.is_lyrics_editor_mode:
-            return
-            
-        # Hide main frames
-        self.cover_art_frame.pack_forget()
-        self.lyrics_frame.pack_forget()
-        self.playlist_frame.pack_forget()
-        
-        # Show lyrics editor
-        self.lyrics_editor.pack(side=tk.TOP, expand=True, fill="both", padx=10, pady=10)
-        self.is_lyrics_editor_mode = True
-        
-        # Start editor update loop
-        self.lyrics_editor.start_update_loop()
-    
-    def exit_lyrics_editor_mode(self):
-        """Exit lyrics editor mode and return to main view"""
-        if not self.is_lyrics_editor_mode:
-            return
-            
-        # Hide lyrics editor
-        self.lyrics_editor.pack_forget()
-        self.is_lyrics_editor_mode = False
-        
-        # Restore main frames
-        self.playlist_frame.pack(side=tk.RIGHT)
-        self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-        self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-        
-        # Only update lyrics if editor has modified content
-        # Check if editor has any timestamped lyrics or if text input has been modified
-        editor_text = self.lyrics_editor.text_input.get("1.0", tk.END).strip()
-        if self.lyrics_editor.timestamped_lyrics or editor_text:
-            # If editor has timestamped lyrics, use those
-            if self.lyrics_editor.timestamped_lyrics:
-                self.lyrics = self.lyrics_editor.timestamped_lyrics.copy()
-                self.lyrics_frame.update_lyrics_list(self.lyrics)
-            # Otherwise, if there's only text content, don't update (avoid overwriting existing lyrics)
-            elif editor_text and not self.lyrics_editor.timestamped_lyrics:
-                # User only entered text without timestamps, keep original lyrics
-                pass
-        else:
-            # Editor is empty, keep original lyrics
-            pass
 
     def round_corners(self, image, radius) -> Image.Image:
         """Rounds Album Cover"""
@@ -389,7 +314,6 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.lyrics_editor = LyricsEditor(self)
 
     def setup_keybindings(self):
         """
