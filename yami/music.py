@@ -24,6 +24,8 @@ from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
+from .database import db
+import threading
 
 
 ctk.set_default_color_theme("yami/data/theme.json")
@@ -48,12 +50,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        self.crossfade_duration = 5  # 默认5秒
-        self.crossfade_in_progress = False
-        self.current_channel = None
-        self.next_channel = None
-        self.current_sound = None
-        self.next_sound = None
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -71,7 +67,6 @@ class MusicPlayer(ctk.CTk):
         # TKINTER SETUP
         self.setup_icons()
         self.setup_frames()
-        self.setup_crossfade_slider()
         self.setup_widget_packing()
 
         self.setup_keybindings()
@@ -80,15 +75,9 @@ class MusicPlayer(ctk.CTk):
         self.after(EVENT_INTERVAL, self.update)
 
     def update(self, event=None):
-        if self.is_playing and not self.crossfade_in_progress:
+        if self.is_playing:
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
-            remaining_time = self.song_length - (current_time - self.song_start_time)
-            
-            # 检查是否需要开始交叉淡入淡出
-            if remaining_time <= self.crossfade_duration and remaining_time > 0:
-                self.start_crossfade()
-            
             if song_position >= 1.0:
                 self.play_next_song()
             else:
@@ -103,11 +92,7 @@ class MusicPlayer(ctk.CTk):
 
     def load_and_play_song(self, index):
         if self.is_playing:
-            if self.current_channel:
-                self.current_channel.stop()
-            if self.next_channel:
-                self.next_channel.stop()
-            self.crossfade_in_progress = False
+            pygame.mixer.music.stop()
         
         self.current_song_index = index
         song_path = self.playlist[index]
@@ -120,10 +105,8 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # 使用多通道播放
-            self.current_sound = pygame.mixer.Sound(song_path)
-            self.current_channel = pygame.mixer.Channel(0)
-            self.current_channel.play(self.current_sound)
+            pygame.mixer.music.load(song_path)
+            pygame.mixer.music.play()
             self.is_playing = True
             self.song_start_time = time.time()
             
@@ -133,6 +116,14 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
+            
+            # 更新数据库中的歌曲信息
+            title = self.get_song_title()
+            artist = self.get_song_artist()
+            threading.Thread(target=db.add_or_update_song, args=(song_path, title, artist)).start()
+            
+            # 更新收藏按钮状态
+            self.control_bar.update_favorite_button()
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -152,6 +143,12 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
+        
+        # 更新当前歌曲的播放次数
+        if self.playlist and self.current_song_index < len(self.playlist):
+            current_song_path = self.playlist[self.current_song_index]
+            threading.Thread(target=db.increment_play_count, args=(current_song_path,)).start()
+        
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
@@ -219,133 +216,10 @@ class MusicPlayer(ctk.CTk):
             )
         except Exception as e:
             logging.exception(e)
-            # 使用默认封面
             return ctk.CTkImage(
                 self.round_corners(Image.open("yami/data/music.png"), 20),
                 size=(250, 250),
             )
-    
-    def start_crossfade(self):
-        """开始交叉淡入淡出"""
-        if self.crossfade_in_progress:
-            return
-        
-        self.crossfade_in_progress = True
-        logging.debug("Starting crossfade")
-        
-        # 计算下一首歌曲的索引
-        next_index = self.current_song_index + 1 if self.current_song_index < len(self.playlist) - 1 else 0
-        next_song_path = self.playlist[next_index]
-        
-        try:
-            # 加载下一首歌曲
-            self.next_sound = pygame.mixer.Sound(next_song_path)
-            self.next_channel = pygame.mixer.Channel(1)
-            
-            # 设置初始音量
-            self.next_channel.set_volume(0.0)
-            self.next_channel.play(self.next_sound)
-            
-            # 启动淡入淡出循环
-            self.fade_out_start_time = time.time()
-            self.after(50, self.update_crossfade)
-            
-        except Exception as e:
-            logging.exception(e)
-            self.crossfade_in_progress = False
-    
-    def update_crossfade(self):
-        """更新交叉淡入淡出的音量"""
-        if not self.crossfade_in_progress:
-            return
-        
-        elapsed_time = time.time() - self.fade_out_start_time
-        progress = min(elapsed_time / self.crossfade_duration, 1.0)
-        
-        # 计算音量
-        current_volume = 1.0 - progress
-        next_volume = progress
-        
-        # 更新音量
-        if self.current_channel:
-            self.current_channel.set_volume(current_volume)
-        if self.next_channel:
-            self.next_channel.set_volume(next_volume)
-        
-        # 检查是否完成
-        if progress < 1.0:
-            self.after(50, self.update_crossfade)
-        else:
-            # 完成淡入淡出
-            self.finish_crossfade()
-    
-    def finish_crossfade(self):
-        """完成交叉淡入淡出"""
-        if self.current_channel:
-            self.current_channel.stop()
-        
-        # 切换到下一首歌曲
-        self.current_song_index = self.current_song_index + 1 if self.current_song_index < len(self.playlist) - 1 else 0
-        self.current_channel = self.next_channel
-        self.current_sound = self.next_sound
-        self.next_channel = None
-        self.next_sound = None
-        
-        # 更新UI
-        self.change_info()
-        self.load_lyrics()
-        self.current_lyric_index = -1
-        
-        # 更新播放列表选择
-        self.playlist_frame.song_list.selection_clear(0, tk.END)
-        self.playlist_frame.song_list.select_set(self.current_song_index)
-        
-        # 重置状态
-        self.crossfade_in_progress = False
-        self.song_start_time = time.time()
-        
-        # 获取新歌曲的长度
-        song_path = self.playlist[self.current_song_index]
-        audio = File(song_path)
-        if audio is not None:
-            self.song_length = audio.info.length
-        else:
-            self.song_length = 180  # 默认3分钟
-        
-        logging.debug("Crossfade finished, now playing %s", self.get_song_title())
-    
-    def setup_crossfade_slider(self):
-        """设置交叉淡入淡出时长滑块"""
-        # 创建滑块框架
-        self.crossfade_frame = ctk.CTkFrame(self, fg_color="#121212")
-        
-        # 创建标签
-        self.crossfade_label = ctk.CTkLabel(
-            self.crossfade_frame,
-            text="Crossfade: {:.1f}s".format(self.crossfade_duration),
-            font=("roboto", 10),
-            text_color="#e0e0e0"
-        )
-        
-        # 创建滑块
-        self.crossfade_slider = ctk.CTkSlider(
-            self.crossfade_frame,
-            from_=0.0,
-            to=10.0,
-            number_of_steps=100,
-            command=self.on_crossfade_slider_change
-        )
-        self.crossfade_slider.set(self.crossfade_duration)
-        
-        # 布局
-        self.crossfade_label.pack(side=tk.LEFT, padx=5, pady=5)
-        self.crossfade_slider.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
-    
-    def on_crossfade_slider_change(self, value):
-        """处理滑块值变化"""
-        self.crossfade_duration = float(value)
-        self.crossfade_label.configure(text="Crossfade: {:.1f}s".format(self.crossfade_duration))
-        logging.debug("Crossfade duration set to %.1f seconds", self.crossfade_duration)
 
     def get_song_artist(self) -> str:
         try:
@@ -473,7 +347,6 @@ class MusicPlayer(ctk.CTk):
 
     def setup_widget_packing(self):
         self.topbar.pack(side=tk.TOP, fill=tk.X)
-        self.crossfade_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
         self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.control_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.playlist_frame.pack(side=tk.RIGHT)
