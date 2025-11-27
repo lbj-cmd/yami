@@ -79,7 +79,7 @@ class MusicPlayer(ctk.CTk):
             if song_position >= 1.0:
                 self.play_next_song()
             else:
-                self.bottom_frame.update_position(song_position)
+                self.bottom_frame.progress_bar.set(song_position)
                 self.control_bar.playback_label.configure(
                     text=make_time_string(int(song_position * self.song_length), self.song_length)
                 )
@@ -114,10 +114,6 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
-            
-            # 加载波形数据
-            logging.debug("Calling load_current_song_waveform")
-            self.bottom_frame.load_current_song_waveform()
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
