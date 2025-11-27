@@ -23,6 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .loop_editor import LoopEditorFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -48,6 +49,11 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
+        # 循环模式相关
+        self.loop_mode = False
+        self.loop_start = 0.0  # 循环开始时间（秒）
+        self.loop_end = 0.0    # 循环结束时间（秒）
+        self.selected_pointer = None  # 当前选中的指针，用于键盘微调
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -59,12 +65,6 @@ class MusicPlayer(ctk.CTk):
         # 歌词相关
         self.lyrics = []  # 存储歌词和时间戳的列表 [(time, lyric), ...]
         self.current_lyric_index = -1  # 当前显示的歌词索引
-
-        # 歌词编辑器相关
-        self.is_lyrics_editor_active = False
-        self.lyrics_editor_frame = None
-        self.lyric_lines = []  # 存储当前编辑的歌词行 [(time, lyric), ...]
-        self.current_editing_line = 0  # 当前正在编辑的歌词行索引
 
         self.initialize_pygame()
 
@@ -82,15 +82,29 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
-            if song_position >= 1.0:
-                self.play_next_song()
+            current_play_time = (current_time - self.song_start_time)
+            
+            # 检查循环模式
+            if self.loop_mode and self.loop_end > self.loop_start:
+                if current_play_time >= self.loop_end:
+                    # 跳转到循环开始位置
+                    self.song_start_time = time.time() - self.loop_start
+                    pygame.mixer.music.set_pos(self.loop_start)
+                    current_play_time = self.loop_start
+                    song_position = current_play_time / self.song_length
             else:
-                self.bottom_frame.progress_bar.set(song_position)
-                self.control_bar.playback_label.configure(
-                    text=make_time_string(int(song_position * self.song_length), self.song_length)
-                )
-                # 更新歌词显示
-                current_play_time = (current_time - self.song_start_time)
+                # 正常播放模式
+                if song_position >= 1.0:
+                    self.play_next_song()
+            
+            # 更新进度条和播放时间
+            self.bottom_frame.progress_bar.set(song_position)
+            self.control_bar.playback_label.configure(
+                text=make_time_string(int(current_play_time), self.song_length)
+            )
+            
+            # 更新歌词显示（如果循环模式未开启）
+            if not self.loop_mode:
                 self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
@@ -320,13 +334,15 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.setup_lyrics_editor_frame()
+        self.loop_editor_frame = LoopEditorFrame(self)
 
     def setup_keybindings(self):
         """
         :param `<F9>`: play next
         :param `<F8>`: play previous
         :param `<Space>`:  play or pause
+        :param `<Left>`: 微调选中的指针向左（0.1s）
+        :param `<Right>`: 微调选中的指针向右（0.1s）
         """
 
         self.bind("<F10>", self.play_next_song)
@@ -334,275 +350,9 @@ class MusicPlayer(ctk.CTk):
         self.bind("<F9>", self.control_bar.play_pause)
         self.bind("<space>", self.control_bar.play_pause)
         self.bind("<Control-o>", self.topbar.choose_folder)
+        self.bind("<Left>", self.on_key_left)
+        self.bind("<Right>", self.on_key_right)
         logging.debug("setup keybinds")
-
-    def setup_lyrics_editor_frame(self):
-        """设置歌词编辑器框架"""
-        self.lyrics_editor_frame = ctk.CTkFrame(self, fg_color="#121212")
-        
-        # 左侧文本输入框
-        self.text_input = ctk.CTkTextbox(
-            self.lyrics_editor_frame,
-            fg_color="#141414",
-            text_color="#e0e0e0",
-            font=("roboto", 14),
-            wrap=tk.WORD
-        )
-        self.text_input.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        
-        # 右侧预览区
-        self.preview_frame = ctk.CTkScrollableFrame(
-            self.lyrics_editor_frame,
-            fg_color="#141414",
-            corner_radius=10
-        )
-        self.preview_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        
-        # 预览区标签列表
-        self.preview_labels = []
-        
-        # 按钮框架
-        self.editor_buttons_frame = ctk.CTkFrame(self.lyrics_editor_frame, fg_color="#121212")
-        self.editor_buttons_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
-        
-        # 退出按钮
-        self.exit_editor_button = ctk.CTkButton(
-            self.editor_buttons_frame,
-            text="退出",
-            font=("roboto", 15),
-            command=self.toggle_lyrics_editor
-        )
-        self.exit_editor_button.grid(row=0, column=0, sticky="w", padx=10, pady=5)
-        
-        # 保存按钮
-        self.save_lyrics_button = ctk.CTkButton(
-            self.editor_buttons_frame,
-            text="保存",
-            font=("roboto", 15),
-            command=self.save_lyrics
-        )
-        self.save_lyrics_button.grid(row=0, column=1, sticky="w", padx=10, pady=5)
-        
-        # 配置网格权重
-        self.lyrics_editor_frame.grid_columnconfigure(0, weight=1)
-        self.lyrics_editor_frame.grid_columnconfigure(1, weight=1)
-        self.lyrics_editor_frame.grid_rowconfigure(0, weight=1)
-        
-        # 初始隐藏编辑器
-        self.lyrics_editor_frame.pack_forget()
-        logging.debug("lyrics editor frame setup")
-
-    def toggle_lyrics_editor(self):
-        """切换歌词编辑器的显示/隐藏"""
-        if self.is_lyrics_editor_active:
-            # 隐藏编辑器，显示原三栏布局
-            self.lyrics_editor_frame.pack_forget()
-            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            self.playlist_frame.pack(side=tk.RIGHT)
-            
-            # 移除编辑器的键盘绑定
-            self.unbind("<Down>")
-            
-            self.is_lyrics_editor_active = False
-            logging.debug("lyrics editor hidden")
-        else:
-            # 隐藏原三栏布局，显示编辑器
-            self.cover_art_frame.pack_forget()
-            self.lyrics_frame.pack_forget()
-            self.playlist_frame.pack_forget()
-            self.lyrics_editor_frame.pack(side=tk.TOP, expand=True, fill="both", padx=10, pady=10)
-            
-            # 绑定Down键到打轴功能
-            self.bind("<Down>", self.add_timestamp)
-            
-            # 初始化歌词编辑数据
-            self.initialize_lyrics_editor()
-            
-            self.is_lyrics_editor_active = True
-            logging.debug("lyrics editor active")
-
-    def initialize_lyrics_editor(self):
-        """初始化歌词编辑器"""
-        # 清空文本输入框和预览区
-        self.text_input.delete(1.0, tk.END)
-        for label in self.preview_labels:
-            label.destroy()
-        self.preview_labels.clear()
-        
-        # 如果当前歌曲有歌词，加载到编辑器
-        if self.lyrics:
-            # 将歌词转换为纯文本格式
-            text_content = "\n".join([lyric for _, lyric in self.lyrics])
-            self.text_input.insert(1.0, text_content)
-            # 初始化预览区
-            self.lyric_lines = self.lyrics.copy()
-        else:
-            # 否则初始化空列表
-            self.lyric_lines = []
-        
-        # 更新预览区
-        self.update_preview()
-        self.current_editing_line = 0
-        logging.debug("lyrics editor initialized")
-
-    def add_timestamp(self, event=None):
-        """为当前歌词行添加时间戳"""
-        if not self.is_playing:
-            return
-        
-        # 获取当前播放进度
-        current_time = time.time() - self.song_start_time
-        
-        # 如果当前编辑行超出范围，添加新行
-        if self.current_editing_line >= len(self.lyric_lines):
-            # 从文本输入框获取所有文本
-            text_content = self.text_input.get(1.0, tk.END).strip()
-            lines = text_content.split("\n")
-            lines = [line.strip() for line in lines if line.strip()]
-            
-            # 如果有新行，添加到lyric_lines
-            if len(lines) > len(self.lyric_lines):
-                for i in range(len(self.lyric_lines), len(lines)):
-                    self.lyric_lines.append((0.0, lines[i]))
-            else:
-                # 否则添加空行
-                self.lyric_lines.append((0.0, ""))
-        
-        # 更新当前行的时间戳
-        if self.current_editing_line < len(self.lyric_lines):
-            self.lyric_lines[self.current_editing_line] = (current_time, self.lyric_lines[self.current_editing_line][1])
-            
-            # 更新预览区
-            self.update_preview()
-            
-            # 自动跳转到下一行
-            self.current_editing_line += 1
-            
-            # 滚动预览区，使当前编辑行居中
-            self.scroll_preview_to_current_line()
-            logging.debug(f"added timestamp {current_time:.2f} to line {self.current_editing_line}")
-
-    def update_preview(self):
-        """更新预览区"""
-        # 清空预览区
-        for label in self.preview_labels:
-            label.destroy()
-        self.preview_labels.clear()
-        
-        # 重新创建预览标签
-        for i, (timestamp, lyric) in enumerate(self.lyric_lines):
-            # 格式化时间戳
-            minutes = int(timestamp // 60)
-            seconds = int(timestamp % 60)
-            milliseconds = int((timestamp % 1) * 100)
-            time_str = f"[{minutes:02d}:{seconds:02d}.{milliseconds:02d}]"
-            
-            # 创建标签
-            label = ctk.CTkLabel(
-                self.preview_frame,
-                text=f"{time_str} {lyric}",
-                font=("roboto", 14),
-                text_color="#e0e0e0",
-                fg_color="#141414",
-                anchor="w"
-            )
-            label.grid(row=i, column=0, sticky="ew", padx=10, pady=5)
-            
-            # 绑定点击事件，跳转到对应时间点
-            label.bind("<Button-1>", lambda e, t=timestamp: self.seek_to_time(t))
-            
-            # 如果是当前编辑行，高亮显示
-            if i == self.current_editing_line:
-                label.configure(fg_color="#3aafa9", text_color="#ffffff")
-            
-            self.preview_labels.append(label)
-        
-        logging.debug("preview updated")
-
-    def scroll_preview_to_current_line(self):
-        """滚动预览区，使当前编辑行居中"""
-        if not self.preview_labels or self.current_editing_line >= len(self.preview_labels):
-            return
-        
-        # 获取当前标签
-        current_label = self.preview_labels[self.current_editing_line]
-        
-        # 获取预览区的高度
-        preview_height = self.preview_frame.winfo_height()
-        
-        # 获取标签的高度
-        label_height = current_label.winfo_height()
-        
-        # 计算滚动位置，使标签居中
-        scroll_position = current_label.winfo_y() - (preview_height // 2) + (label_height // 2)
-        
-        # 滚动到指定位置
-        self.preview_frame._parent_canvas.yview_moveto(scroll_position / self.preview_frame._parent_canvas.winfo_height())
-        logging.debug("preview scrolled to current line")
-
-    def seek_to_time(self, timestamp):
-        """跳转到指定时间点"""
-        if not self.is_playing:
-            return
-        
-        # 设置新的播放位置
-        pygame.mixer.music.set_pos(timestamp)
-        self.song_start_time = time.time() - timestamp
-        logging.debug(f"seeked to time {timestamp:.2f}")
-
-    def save_lyrics(self):
-        """保存歌词到文件"""
-        if not self.playlist or self.current_song_index >= len(self.playlist):
-            return
-        
-        # 从文本输入框获取最新的歌词文本
-        text_content = self.text_input.get(1.0, tk.END).strip()
-        lines = text_content.split("\n")
-        lines = [line.strip() for line in lines if line.strip()]
-        
-        # 更新lyric_lines的歌词内容
-        for i in range(len(self.lyric_lines)):
-            if i < len(lines):
-                self.lyric_lines[i] = (self.lyric_lines[i][0], lines[i])
-            else:
-                # 如果lyric_lines比文本行数多，删除多余的行
-                self.lyric_lines = self.lyric_lines[:len(lines)]
-                break
-        
-        # 如果文本行数比lyric_lines多，添加新行
-        for i in range(len(self.lyric_lines), len(lines)):
-            self.lyric_lines.append((0.0, lines[i]))
-        
-        # 按时间戳排序
-        self.lyric_lines.sort(key=lambda x: x[0])
-        
-        # 生成LRC格式内容
-        lrc_content = ""
-        for timestamp, lyric in self.lyric_lines:
-            if timestamp > 0:
-                minutes = int(timestamp // 60)
-                seconds = int(timestamp % 60)
-                milliseconds = int((timestamp % 1) * 100)
-                time_str = f"[{minutes:02d}:{seconds:02d}.{milliseconds:02d}]"
-                lrc_content += f"{time_str} {lyric}\n"
-            else:
-                lrc_content += f"{lyric}\n"
-        
-        # 保存到文件
-        song_path = self.playlist[self.current_song_index]
-        lrc_path = Path(song_path).with_suffix('.lrc')
-        
-        try:
-            with open(lrc_path, 'w', encoding='utf-8') as f:
-                f.write(lrc_content)
-            logging.debug(f"lyrics saved to {lrc_path}")
-            
-            # 更新当前歌曲的歌词
-            self.lyrics = self.parse_lrc(lrc_content)
-            self.lyrics_frame.update_lyrics_list(self.lyrics)
-        except Exception as e:
-            logging.exception("Failed to save lyrics: %s", e)
 
     def setup_widget_packing(self):
         self.topbar.pack(side=tk.TOP, fill=tk.X)
@@ -613,6 +363,40 @@ class MusicPlayer(ctk.CTk):
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
 
+    def on_key_left(self, event):
+        """Handles left arrow key press for fine-tuning pointers"""
+        if not self.loop_mode or not self.selected_pointer:
+            return
+        
+        # 微调指针向左（减少0.1s）
+        if self.selected_pointer == "start":
+            self.loop_start = max(0.0, self.loop_start - 0.1)
+            # 确保开始时间小于结束时间
+            self.loop_start = min(self.loop_start, self.loop_end - 0.1)
+        else:
+            self.loop_end = max(self.loop_end - 0.1, self.loop_start + 0.1)
+            # 确保结束时间小于歌曲长度
+            self.loop_end = min(self.loop_end, self.song_length)
+        
+        # 更新循环编辑器
+        self.loop_editor_frame.update_loop_times(self.loop_start, self.loop_end)
+    
+    def on_key_right(self, event):
+        """Handles right arrow key press for fine-tuning pointers"""
+        if not self.loop_mode or not self.selected_pointer:
+            return
+        
+        # 微调指针向右（增加0.1s）
+        if self.selected_pointer == "start":
+            self.loop_start = min(self.loop_start + 0.1, self.loop_end - 0.1)
+        else:
+            self.loop_end = min(self.loop_end + 0.1, self.song_length)
+            # 确保结束时间大于开始时间
+            self.loop_end = max(self.loop_end, self.loop_start + 0.1)
+        
+        # 更新循环编辑器
+        self.loop_editor_frame.update_loop_times(self.loop_start, self.loop_end)
+    
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
