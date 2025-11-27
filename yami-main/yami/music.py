@@ -23,7 +23,6 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
-from .loop_editor import LoopEditorFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -49,11 +48,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        # 循环模式相关
-        self.loop_mode = False
-        self.loop_start = 0.0  # 循环开始时间（秒）
-        self.loop_end = 0.0    # 循环结束时间（秒）
-        self.selected_pointer = None  # 当前选中的指针，用于键盘微调
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -82,29 +76,15 @@ class MusicPlayer(ctk.CTk):
         if self.is_playing:
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
-            current_play_time = (current_time - self.song_start_time)
-            
-            # 检查循环模式
-            if self.loop_mode and self.loop_end > self.loop_start:
-                if current_play_time >= self.loop_end:
-                    # 跳转到循环开始位置
-                    self.song_start_time = time.time() - self.loop_start
-                    pygame.mixer.music.set_pos(self.loop_start)
-                    current_play_time = self.loop_start
-                    song_position = current_play_time / self.song_length
+            if song_position >= 1.0:
+                self.play_next_song()
             else:
-                # 正常播放模式
-                if song_position >= 1.0:
-                    self.play_next_song()
-            
-            # 更新进度条和播放时间
-            self.bottom_frame.progress_bar.set(song_position)
-            self.control_bar.playback_label.configure(
-                text=make_time_string(int(current_play_time), self.song_length)
-            )
-            
-            # 更新歌词显示（如果循环模式未开启）
-            if not self.loop_mode:
+                self.bottom_frame.progress_bar.set(song_position)
+                self.control_bar.playback_label.configure(
+                    text=make_time_string(int(song_position * self.song_length), self.song_length)
+                )
+                # 更新歌词显示
+                current_play_time = (current_time - self.song_start_time)
                 self.lyrics_frame.update_lyrics(current_play_time)
         self.after(EVENT_INTERVAL, self.update)
 
@@ -334,15 +314,12 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
-        self.loop_editor_frame = LoopEditorFrame(self)
 
     def setup_keybindings(self):
         """
         :param `<F9>`: play next
         :param `<F8>`: play previous
         :param `<Space>`:  play or pause
-        :param `<Left>`: 微调选中的指针向左（0.1s）
-        :param `<Right>`: 微调选中的指针向右（0.1s）
         """
 
         self.bind("<F10>", self.play_next_song)
@@ -350,8 +327,6 @@ class MusicPlayer(ctk.CTk):
         self.bind("<F9>", self.control_bar.play_pause)
         self.bind("<space>", self.control_bar.play_pause)
         self.bind("<Control-o>", self.topbar.choose_folder)
-        self.bind("<Left>", self.on_key_left)
-        self.bind("<Right>", self.on_key_right)
         logging.debug("setup keybinds")
 
     def setup_widget_packing(self):
@@ -363,40 +338,6 @@ class MusicPlayer(ctk.CTk):
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
         logging.debug("widgets packed")
 
-    def on_key_left(self, event):
-        """Handles left arrow key press for fine-tuning pointers"""
-        if not self.loop_mode or not self.selected_pointer:
-            return
-        
-        # 微调指针向左（减少0.1s）
-        if self.selected_pointer == "start":
-            self.loop_start = max(0.0, self.loop_start - 0.1)
-            # 确保开始时间小于结束时间
-            self.loop_start = min(self.loop_start, self.loop_end - 0.1)
-        else:
-            self.loop_end = max(self.loop_end - 0.1, self.loop_start + 0.1)
-            # 确保结束时间小于歌曲长度
-            self.loop_end = min(self.loop_end, self.song_length)
-        
-        # 更新循环编辑器
-        self.loop_editor_frame.update_loop_times(self.loop_start, self.loop_end)
-    
-    def on_key_right(self, event):
-        """Handles right arrow key press for fine-tuning pointers"""
-        if not self.loop_mode or not self.selected_pointer:
-            return
-        
-        # 微调指针向右（增加0.1s）
-        if self.selected_pointer == "start":
-            self.loop_start = min(self.loop_start + 0.1, self.loop_end - 0.1)
-        else:
-            self.loop_end = min(self.loop_end + 0.1, self.song_length)
-            # 确保结束时间大于开始时间
-            self.loop_end = max(self.loop_end, self.loop_start + 0.1)
-        
-        # 更新循环编辑器
-        self.loop_editor_frame.update_loop_times(self.loop_start, self.loop_end)
-    
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
