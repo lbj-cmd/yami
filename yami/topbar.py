@@ -49,10 +49,19 @@ class TopBar(ctk.CTkFrame):
             image=parent.music_icon,
         )
 
+        self.batch_editor = ctk.CTkButton(
+            self,
+            text="Batch Edit",
+            font= ("roboto", 15),
+            width=70,
+            command=self.open_batch_editor
+        )
+
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.batch_editor.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
 
     # FOR ADDING SONGS TO PLAYLIST
@@ -91,6 +100,12 @@ class TopBar(ctk.CTkFrame):
         )
         if song_url:
             self.parent.loop.create_task(self.download_song(song_url))
+
+    def open_batch_editor(self):
+        """Open the batch tag editor"""
+        from .batch_editor import BatchTagEditor
+        editor = BatchTagEditor(self.parent)
+        editor.grab_set()
 
     def get_name_and_title_of_file(self, file_path):
         """gets song artist name and title of song"""

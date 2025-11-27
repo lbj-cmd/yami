@@ -60,19 +60,7 @@ class ControlBar(ctk.CTkFrame):
             text_color="#e0e0e0",
         )
         self.playback_label = ctk.CTkLabel(
-            self,
-            text="0:00 / 0:00",
-            font=("roboto", 12),
-            fg_color="#121212"
-        )
-        # 循环模式开关
-        self.loop_button = ctk.CTkButton(
-            self,
-            command=self.toggle_loop_mode,
-            width=BUTTON_WIDTH,
-            text="Loop",
-            corner_radius=10,
-            font=("roboto", 12)
+            self, text="0:00 / 0:00", font=("roboto", 12), fg_color="#121212"
         )
 
         # PLACEMENT
@@ -81,7 +69,6 @@ class ControlBar(ctk.CTkFrame):
         self.grid_columnconfigure(2, weight=0)
         self.grid_columnconfigure(3, weight=0)
         self.grid_columnconfigure(4, weight=0)
-        self.grid_columnconfigure(5, weight=0)
 
         # PLACEMENT
         self.music_title_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
@@ -89,7 +76,6 @@ class ControlBar(ctk.CTkFrame):
         self.prev_button.grid(row=0, column=2, sticky="nsew", padx=5, pady=10)
         self.play_button.grid(row=0, column=3, sticky="nsew", padx=5, pady=10)
         self.next_button.grid(row=0, column=4, sticky="nsew", padx=5, pady=10)
-        self.loop_button.grid(row=0, column=5, sticky="nsew", padx=5, pady=10)
         logging.debug("initialized control bar")
 
     def play_pause(self, event=None):
@@ -114,28 +100,6 @@ class ControlBar(ctk.CTkFrame):
         else:
             self.play_button.configure(image=self.play_icon)
             logging.debug("updated play button to play")
-
-    def toggle_loop_mode(self):
-        """Toggles loop mode on/off"""
-        self.parent.loop_mode = not self.parent.loop_mode
-        if self.parent.loop_mode:
-            self.loop_button.configure(text="Loop On", fg_color="#3aafa9")
-            # 初始化循环区间为整个歌曲
-            self.parent.loop_start = 0.0
-            self.parent.loop_end = self.parent.song_length
-            # 隐藏歌词面板，显示循环编辑器
-            self.parent.lyrics_frame.pack_forget()
-            self.parent.loop_editor_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            # 延迟绘制波形图和指针，确保画布尺寸已更新
-            self.parent.loop_editor_frame.after(100, self.parent.loop_editor_frame.draw_waveform)
-            self.parent.loop_editor_frame.after(100, self.parent.loop_editor_frame.draw_pointers)
-            logging.debug("loop mode enabled")
-        else:
-            self.loop_button.configure(text="Loop")
-            # 显示歌词面板，隐藏循环编辑器
-            self.parent.loop_editor_frame.pack_forget()
-            self.parent.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            logging.debug("loop mode disabled")
 
     # TRUNCATOR
     def set_music_title(self, title, artist):
