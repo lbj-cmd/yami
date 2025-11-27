@@ -48,21 +48,25 @@ class TopBar(ctk.CTkFrame):
             width=70,
             image=parent.music_icon,
         )
-
-        self.batch_editor = ctk.CTkButton(
+        
+        self.audio_3d_button = ctk.CTkButton(
             self,
-            text="Batch Edit",
-            font= ("roboto", 15),
+            text="3D 音效",
+            font=("roboto", 15),
             width=70,
-            command=self.open_batch_editor
+            command=self.toggle_audio_3d,
         )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.batch_editor.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
+        self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.audio_3d_button.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
+    
+    def toggle_audio_3d(self):
+        """Toggle between 3D audio visualization and normal view"""
+        self.parent.toggle_audio_3d()
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
@@ -100,12 +104,6 @@ class TopBar(ctk.CTkFrame):
         )
         if song_url:
             self.parent.loop.create_task(self.download_song(song_url))
-
-    def open_batch_editor(self):
-        """Open the batch tag editor"""
-        from .batch_editor import BatchTagEditor
-        editor = BatchTagEditor(self.parent)
-        editor.grab_set()
 
     def get_name_and_title_of_file(self, file_path):
         """gets song artist name and title of song"""

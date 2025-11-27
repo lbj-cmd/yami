@@ -23,6 +23,7 @@ from .control import ControlBar
 from .cover_art import CoverArtFrame
 from .progress import BottomFrame
 from .lyrics import LyricsFrame
+from .audio_3d import Audio3DFrame
 from .util import GEOMETRY, TITLE, PlayerState, EVENT_INTERVAL, make_time_string
 
 
@@ -314,6 +315,8 @@ class MusicPlayer(ctk.CTk):
         self.bottom_frame = BottomFrame(self)
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
+        self.audio_3d_frame = Audio3DFrame(self)
+        self.is_audio_3d_active = False
 
     def setup_keybindings(self):
         """
@@ -336,7 +339,23 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+        # Audio3DFrame is initially hidden
         logging.debug("widgets packed")
+    
+    def toggle_audio_3d(self):
+        """Toggle between 3D audio visualization and normal view"""
+        if self.is_audio_3d_active:
+            # Switch back to normal view
+            self.audio_3d_frame.pack_forget()
+            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
+            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            self.is_audio_3d_active = False
+        else:
+            # Switch to 3D audio view
+            self.cover_art_frame.pack_forget()
+            self.lyrics_frame.pack_forget()
+            self.audio_3d_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            self.is_audio_3d_active = True
 
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
