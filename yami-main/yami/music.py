@@ -8,7 +8,6 @@ import logging
 import time
 import io
 import re
-from .database import MusicDatabase
 
 
 from mutagen import File, id3
@@ -49,9 +48,6 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
-        
-        # Database initialization
-        self.db = MusicDatabase()
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -81,12 +77,6 @@ class MusicPlayer(ctk.CTk):
             current_time = time.time()
             song_position = (current_time - self.song_start_time) / self.song_length
             if song_position >= 1.0:
-                # 歌曲播放结束，更新播放次数并播放下一首
-                if self.playlist and self.current_song_index < len(self.playlist):
-                    current_song_path = self.playlist[self.current_song_index]
-                    self.db.increment_play_count(current_song_path)
-                    # 更新常听歌曲列表
-                    self.playlist_frame.update_top_songs()
                 self.play_next_song()
             else:
                 self.bottom_frame.progress_bar.set(song_position)
@@ -113,12 +103,6 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # 获取歌曲元数据并更新数据库
-            title = self.get_song_title()
-            artist = self.get_song_artist()
-            album = self.get_song_album()
-            self.db.add_or_update_song(song_path, title, artist, album, int(self.song_length))
-            
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.play()
             self.is_playing = True
@@ -126,9 +110,6 @@ class MusicPlayer(ctk.CTk):
             
             # CHANGE INFO
             self.change_info()
-            
-            # Update favorite button state
-            self.control_bar.update_favorite_button()
             
             # 加载歌词
             self.load_lyrics()
@@ -236,19 +217,6 @@ class MusicPlayer(ctk.CTk):
         except Exception as e:
             logging.exception(e)
             return "Unknown Artist"
-    
-    def get_song_album(self) -> str:
-        try:
-            song_path = self.playlist[self.current_song_index]
-            audio = File(song_path)
-            if audio is not None and hasattr(audio, 'tags') and audio.tags is not None:
-                album = audio.tags.get('TALB', audio.tags.get('ALBUM', ['']))
-                if album:
-                    return str(album[0])
-            return "Unknown Album"
-        except Exception as e:
-            logging.exception(e)
-            return "Unknown Album"
     
     def parse_lrc(self, lrc_content: str) -> list:
         """解析LRC格式的歌词内容"""
