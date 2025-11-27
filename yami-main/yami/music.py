@@ -138,7 +138,9 @@ class MusicPlayer(ctk.CTk):
         else:
             self.load_and_play_song(0)  # 循环播放
         
-        # UPDATE SELECTION - handled by SongItem on_click event
+        # UPDATE SELECTION
+        self.playlist_frame.song_list.selection_clear(0, tk.END)
+        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
@@ -147,7 +149,9 @@ class MusicPlayer(ctk.CTk):
         else:
             self.load_and_play_song(len(self.playlist) - 1)  # 循环播放
         
-        # UPDATE SELECTION - handled by SongItem on_click event
+        # UPDATE SELECTION
+        self.playlist_frame.song_list.selection_clear(0, tk.END)
+        self.playlist_frame.song_list.select_set(self.current_song_index)
 
     def get_song_length(self) -> int:
         logging.debug("got song length")
