@@ -2,10 +2,11 @@
 
 import tkinter as tk
 import math
+import threading
+import time
 import pygame
-from pygame import mixer
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+import numpy as np
 
 class Audio3DFrame(ctk.CTkFrame):
     """3D Audio Visualization and Mixer Frame"""
@@ -39,6 +40,12 @@ class Audio3DFrame(ctk.CTkFrame):
         # Drag State
         self.is_dragging = False
         
+        # Audio State
+        self.audio_segment = None
+        self.is_playing = False
+        self.playback_thread = None
+        self.current_position = 0
+        
         # Bind Events
         self.canvas.bind("<Button-1>", self.start_drag)
         self.canvas.bind("<B1-Motion>", self.drag_source)
@@ -46,6 +53,9 @@ class Audio3DFrame(ctk.CTkFrame):
         
         # Start Update Loop
         self.update_loop()
+        
+        # Initialize Pygame Mixer
+        pygame.mixer.init()
         
     def start_drag(self, event):
         """Start dragging the sound source"""
@@ -102,16 +112,59 @@ class Audio3DFrame(ctk.CTkFrame):
         # Apply DSP to audio
         self.apply_dsp()
     
+
+    
+
+    
     def apply_dsp(self):
-        """Apply DSP effects to the audio"""
-        if mixer.get_init():
-            # Set volume
-            mixer.music.set_volume(self.volume)
+        """Apply DSP effects using pygame mixer"""
+        # Apply volume
+        pygame.mixer.music.set_volume(self.volume)
+        
+        # Apply panning using channel volumes
+        if pygame.mixer.get_num_channels() > 0:
+            channel = pygame.mixer.Channel(0)
+            left_gain = 1.0 - self.pan
+            right_gain = self.pan
+            channel.set_volume(left_gain, right_gain)
+    
+
+    
+    def start_audio_playback(self, file_path):
+        """Start audio playback with real-time DSP"""
+        # Stop any existing playback
+        self.stop_audio_playback()
+        
+        try:
+            # Load audio into pygame mixer
+            pygame.mixer.music.load(file_path)
             
-            # Note: Pygame mixer doesn't support panning or reverb natively
-            # For a real implementation, we'd need to use a more advanced audio library
-            # This is a placeholder for demonstration
-            pass
+            self.is_playing = True
+            self.current_position = 0
+            pygame.mixer.music.play()
+            
+            # Start a thread to monitor playback
+            self.playback_thread = threading.Thread(target=self.monitor_playback)
+            self.playback_thread.daemon = True
+            self.playback_thread.start()
+            
+        except Exception as e:
+            print(f"Failed to start audio playback: {e}")
+    
+    def stop_audio_playback(self):
+        """Stop audio playback"""
+        self.is_playing = False
+        pygame.mixer.music.stop()
+        self.current_position = 0
+    
+    def monitor_playback(self):
+        """Monitor audio playback and restart if needed"""
+        while self.is_playing and pygame.mixer.music.get_busy():
+            time.sleep(0.1)
+        
+        # If we've reached the end of the audio, restart playback (loop)
+        if self.is_playing:
+            self.start_audio_playback(self.parent.playlist[self.parent.current_song_index])
     
     def create_reverb_wave(self):
         """Create a new reverb wave"""
@@ -179,3 +232,19 @@ class Audio3DFrame(ctk.CTkFrame):
         self.update_reverb_waves()
         self.draw()
         self.after(50, self.update_loop)
+    
+    def on_enter(self):
+        """Called when the frame is entered"""
+        # Stop pygame playback and start our own with DSP
+        if self.parent.is_playing and self.parent.playlist:
+            pygame.mixer.music.stop()
+            self.start_audio_playback(self.parent.playlist[self.parent.current_song_index])
+    
+    def on_leave(self):
+        """Called when the frame is left"""
+        # Stop our DSP playback and resume pygame playback
+        self.stop_audio_playback()
+        if self.parent.playlist:
+            pygame.mixer.music.load(self.parent.playlist[self.parent.current_song_index])
+            pygame.mixer.music.play(start=self.parent.get_song_position() * self.parent.song_length)
+            self.parent.is_playing = True
