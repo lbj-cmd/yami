@@ -1,0 +1,2 @@
+recursive-include yami/data *
+recursive-include .assets *

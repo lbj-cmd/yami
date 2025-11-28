@@ -48,25 +48,12 @@ class TopBar(ctk.CTkFrame):
             width=70,
             image=parent.music_icon,
         )
-        
-        self.audio_3d_button = ctk.CTkButton(
-            self,
-            text="3D 音效",
-            font=("roboto", 15),
-            width=70,
-            command=self.toggle_audio_3d,
-        )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
         self.yami.grid(row=0, column=3, sticky="w", pady=5, padx=10)
-        self.audio_3d_button.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
-    
-    def toggle_audio_3d(self):
-        """Toggle between 3D audio visualization and normal view"""
-        self.parent.toggle_audio_3d()
 
     # FOR ADDING SONGS TO PLAYLIST
     """TODO MAKE IT SMALLER AND SIMPLER"""
