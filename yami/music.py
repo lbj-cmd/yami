@@ -403,6 +403,7 @@ class MusicPlayer(ctk.CTk):
             
             # 移除编辑器的键盘绑定
             self.unbind("<Down>")
+            self.unbind("<Up>")
             
             self.is_lyrics_editor_active = False
             logging.debug("lyrics editor hidden")
@@ -413,8 +414,9 @@ class MusicPlayer(ctk.CTk):
             self.playlist_frame.pack_forget()
             self.lyrics_editor_frame.pack(side=tk.TOP, expand=True, fill="both", padx=10, pady=10)
             
-            # 绑定Down键到打轴功能
-            self.bind("<Down>", self.add_timestamp)
+            # 绑定键盘事件到打轴功能
+            self.bind("<Down>", self.handle_arrow_key)
+            self.bind("<Up>", self.handle_arrow_key)
             
             # 初始化歌词编辑数据
             self.initialize_lyrics_editor()
@@ -446,7 +448,22 @@ class MusicPlayer(ctk.CTk):
         self.current_editing_line = 0
         logging.debug("lyrics editor initialized")
 
-    def add_timestamp(self, event=None):
+    def handle_arrow_key(self, event=None):
+        """处理箭头键事件 - 仅在焦点不在输入框时响应打轴快捷键"""
+        # 检查焦点是否在文本输入框
+        if self.text_input.focus_get() == self.text_input:
+            return  # 让文本输入框处理箭头键事件
+        
+        # 根据按键类型执行相应操作
+        if event.keysym == "Down":
+            self.add_timestamp()
+        elif event.keysym == "Up":
+            self.move_to_previous_line()
+        
+        # 阻止事件继续传播
+        return "break"
+
+    def add_timestamp(self):
         """为当前歌词行添加时间戳"""
         if not self.is_playing:
             return
@@ -483,40 +500,58 @@ class MusicPlayer(ctk.CTk):
             self.scroll_preview_to_current_line()
             logging.debug(f"added timestamp {current_time:.2f} to line {self.current_editing_line}")
 
+    def move_to_previous_line(self):
+        """移动到上一行歌词"""
+        if self.current_editing_line > 0:
+            self.current_editing_line -= 1
+            self.update_preview()
+            self.scroll_preview_to_current_line()
+            logging.debug(f"moved to previous line {self.current_editing_line}")
+
     def update_preview(self):
-        """更新预览区"""
-        # 清空预览区
-        for label in self.preview_labels:
-            label.destroy()
-        self.preview_labels.clear()
-        
-        # 重新创建预览标签
+        """更新预览区 - 只更新状态不重建"""
+        # 格式化时间戳并更新现有标签
         for i, (timestamp, lyric) in enumerate(self.lyric_lines):
-            # 格式化时间戳
             minutes = int(timestamp // 60)
             seconds = int(timestamp % 60)
             milliseconds = int((timestamp % 1) * 100)
             time_str = f"[{minutes:02d}:{seconds:02d}.{milliseconds:02d}]"
             
-            # 创建标签
-            label = ctk.CTkLabel(
-                self.preview_frame,
-                text=f"{time_str} {lyric}",
-                font=("roboto", 14),
-                text_color="#e0e0e0",
-                fg_color="#141414",
-                anchor="w"
-            )
-            label.grid(row=i, column=0, sticky="ew", padx=10, pady=5)
-            
-            # 绑定点击事件，跳转到对应时间点
-            label.bind("<Button-1>", lambda e, t=timestamp: self.seek_to_time(t))
-            
-            # 如果是当前编辑行，高亮显示
-            if i == self.current_editing_line:
-                label.configure(fg_color="#3aafa9", text_color="#ffffff")
-            
-            self.preview_labels.append(label)
+            if i < len(self.preview_labels):
+                # 更新现有标签
+                label = self.preview_labels[i]
+                label.configure(text=f"{time_str} {lyric}")
+                
+                # 更新高亮状态
+                if i == self.current_editing_line:
+                    label.configure(fg_color="#3aafa9", text_color="#ffffff")
+                else:
+                    label.configure(fg_color="#141414", text_color="#e0e0e0")
+            else:
+                # 创建新标签
+                label = ctk.CTkLabel(
+                    self.preview_frame,
+                    text=f"{time_str} {lyric}",
+                    font=("roboto", 14),
+                    text_color="#e0e0e0",
+                    fg_color="#141414",
+                    anchor="w"
+                )
+                label.grid(row=i, column=0, sticky="ew", padx=10, pady=5)
+                
+                # 绑定点击事件，跳转到对应时间点
+                label.bind("<Button-1>", lambda e, t=timestamp: self.seek_to_time(t))
+                
+                # 如果是当前编辑行，高亮显示
+                if i == self.current_editing_line:
+                    label.configure(fg_color="#3aafa9", text_color="#ffffff")
+                
+                self.preview_labels.append(label)
+        
+        # 删除多余的标签
+        while len(self.preview_labels) > len(self.lyric_lines):
+            label = self.preview_labels.pop()
+            label.destroy()
         
         logging.debug("preview updated")
 
