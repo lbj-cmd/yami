@@ -48,20 +48,20 @@ class TopBar(ctk.CTkFrame):
             width=70,
             image=parent.music_icon,
         )
-        
-        self.audio_3d_btn = ctk.CTkButton(
+
+        self.sound_3d = ctk.CTkButton(
             self,
             text="3D 音效",
             font=("roboto", 15),
             width=80,
             image=parent.music_icon,
-            command=self.toggle_3d_audio
+            command=self.toggle_3d_sound
         )
 
         # WIDGET PLACEMENT
         self.open_folder.grid(row=0, column=1, sticky="w", pady=5, padx=10)
         self.music_downloader.grid(row=0, column=2, sticky="w", pady=5, padx=10)
-        self.audio_3d_btn.grid(row=0, column=3, sticky="w", pady=5, padx=10)
+        self.sound_3d.grid(row=0, column=3, sticky="w", pady=5, padx=10)
         self.yami.grid(row=0, column=4, sticky="w", pady=5, padx=10)
         logging.debug("initialized topbar")
 
@@ -163,6 +163,6 @@ class TopBar(ctk.CTkFrame):
             "end", f"• {Path(self.downloaded_song_path).stem}"
         )
     
-    def toggle_3d_audio(self):
-        """切换3D音效界面"""
-        self.parent.toggle_3d_audio_mode()
+    def toggle_3d_sound(self):
+        """Toggle 3D sound interface"""
+        self.parent.toggle_3d_sound_mode()
