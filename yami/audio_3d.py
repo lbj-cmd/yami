@@ -1,250 +1,244 @@
-"""3D Audio Visualization and DSP"""
+"""3D Audio Mixer Panel"""
 
+import customtkinter as ctk
 import tkinter as tk
 import math
-import threading
-import time
+import logging
 import pygame
-import customtkinter as ctk
-import numpy as np
+
 
 class Audio3DFrame(ctk.CTkFrame):
-    """3D Audio Visualization and Mixer Frame"""
+    """3D Audio Mixer with Canvas Interaction"""
     
     def __init__(self, parent):
-        super().__init__(parent, fg_color="#121212")
+        super().__init__(
+            parent,
+            corner_radius=10,
+            fg_color="#121212"
+        )
         self.parent = parent
+        self.radius = 200  # 房间半径
+        self.center_x = 350
+        self.center_y = 250
+        self.source_radius = 10
+        self.source_x = self.center_x
+        self.source_y = self.center_y
+        self.last_drag_pos = (self.center_x, self.center_y)
         
-        # 3D Audio Parameters
-        self.room_radius = 200
-        self.listener_radius = 10
-        self.source_radius = 8
-        self.source_x = 0
-        self.source_y = 0
-        self.max_distance = self.room_radius - self.listener_radius - self.source_radius
+        # 音频参数
+        self.max_volume = 1.0
+        self.min_volume = 0.05
+        self.pan = 0.0
+        self.distance = 0.0
+        self.volume = self.max_volume
+        self.last_audio_update = 0
         
-        # DSP Parameters
-        self.pan = 0.5  # 0 = left, 1 = right
-        self.volume = 1.0
-        self.reverb = 0.0
+        # 波纹效果
+        self.waves = []
         
-        # Visualization Parameters
-        self.reverb_waves = []
-        self.wave_speed = 2
-        self.wave_max_radius = 100
-        
-        # Canvas Setup
-        self.canvas = tk.Canvas(self, width=500, height=500, bg="#121212", highlightthickness=0)
+        # 创建Canvas
+        self.canvas = tk.Canvas(self, 
+                               width=700, 
+                               height=500,
+                               bg="#141414",
+                               highlightthickness=0)
         self.canvas.pack(expand=True, fill="both", padx=10, pady=10)
         
-        # Drag State
-        self.is_dragging = False
+        # 绘制初始界面
+        self.draw_room()
+        self.draw_listener()
+        self.draw_source()
         
-        # Audio State
-        self.audio_segment = None
-        self.is_playing = False
-        self.playback_thread = None
-        self.current_position = 0
+        # 设置拖拽事件
+        self.canvas.tag_bind("source", "<ButtonPress-1>", self.on_source_click)
+        self.canvas.tag_bind("source", "<B1-Motion>", self.on_source_drag)
         
-        # Bind Events
-        self.canvas.bind("<Button-1>", self.start_drag)
-        self.canvas.bind("<B1-Motion>", self.drag_source)
-        self.canvas.bind("<ButtonRelease-1>", self.stop_drag)
+        # 添加控制面板
+        self.control_panel = ctk.CTkFrame(self, fg_color="#181818", corner_radius=10)
+        self.control_panel.pack(fill=tk.X, padx=10, pady=5)
         
-        # Start Update Loop
-        self.update_loop()
+        # 声像显示
+        self.pan_label = ctk.CTkLabel(self.control_panel, text="Pan: 0.0", font=("roboto", 12))
+        self.pan_label.pack(side=tk.LEFT, padx=20, pady=5)
         
-        # Initialize Pygame Mixer
-        pygame.mixer.init()
+        # 音量显示
+        self.volume_label = ctk.CTkLabel(self.control_panel, text="Volume: 100%", font=("roboto", 12))
+        self.volume_label.pack(side=tk.LEFT, padx=20, pady=5)
         
-    def start_drag(self, event):
-        """Start dragging the sound source"""
-        x, y = self.canvas_to_world(event.x, event.y)
-        distance = math.hypot(x - self.source_x, y - self.source_y)
-        if distance <= self.source_radius:
-            self.is_dragging = True
-    
-    def drag_source(self, event):
-        """Drag the sound source within the room"""
-        if self.is_dragging:
-            x, y = self.canvas_to_world(event.x, event.y)
-            distance = math.hypot(x, y)
-            if distance > self.max_distance:
-                angle = math.atan2(y, x)
-                x = math.cos(angle) * self.max_distance
-                y = math.sin(angle) * self.max_distance
-            self.source_x = x
-            self.source_y = y
-            self.update_dsp()
-            self.create_reverb_wave()
-    
-    def stop_drag(self, event):
-        """Stop dragging the sound source"""
-        self.is_dragging = False
-    
-    def canvas_to_world(self, x, y):
-        """Convert canvas coordinates to world coordinates"""
-        center_x = self.canvas.winfo_width() // 2
-        center_y = self.canvas.winfo_height() // 2
-        return x - center_x, y - center_y
-    
-    def world_to_canvas(self, x, y):
-        """Convert world coordinates to canvas coordinates"""
-        center_x = self.canvas.winfo_width() // 2
-        center_y = self.canvas.winfo_height() // 2
-        return x + center_x, y + center_y
-    
-    def update_dsp(self):
-        """Update DSP parameters based on source position"""
-        # Calculate Pan (X-axis position)
-        self.pan = (self.source_x / self.max_distance + 1) / 2  # Normalize to 0-1
+        # 混响显示
+        self.reverb_label = ctk.CTkLabel(self.control_panel, text="Reverb: 0%", font=("roboto", 12))
+        self.reverb_label.pack(side=tk.LEFT, padx=20, pady=5)
         
-        # Calculate Volume (distance from center)
-        distance = math.hypot(self.source_x, self.source_y)
-        self.volume = 1.0 - (distance / self.max_distance)  # Linear attenuation
-        self.volume = max(0.1, min(1.0, self.volume))  # Clamp between 0.1 and 1.0
+        # 重置按钮
+        self.reset_btn = ctk.CTkButton(self.control_panel, text="Reset", command=self.reset_position, width=80)
+        self.reset_btn.pack(side=tk.RIGHT, padx=20, pady=5)
         
-        # Calculate Reverb (distance from room edge)
-        distance_to_edge = self.max_distance - distance
-        self.reverb = 1.0 - (distance_to_edge / self.max_distance)  # More reverb near edges
-        self.reverb = max(0.0, min(0.8, self.reverb))  # Clamp between 0 and 0.8
+        # 更新音频参数
+        self.update_audio_params()
         
-        # Apply DSP to audio
-        self.apply_dsp()
-    
-
-    
-
-    
-    def apply_dsp(self):
-        """Apply DSP effects using pygame mixer"""
-        # Apply volume
-        pygame.mixer.music.set_volume(self.volume)
+        # 启动动画循环
+        self.animate_waves()
         
-        # Apply panning using channel volumes
-        if pygame.mixer.get_num_channels() > 0:
-            channel = pygame.mixer.Channel(0)
-            left_gain = 1.0 - self.pan
-            right_gain = self.pan
-            channel.set_volume(left_gain, right_gain)
-    
-
-    
-    def start_audio_playback(self, file_path):
-        """Start audio playback with real-time DSP"""
-        # Stop any existing playback
-        self.stop_audio_playback()
+        logging.debug("initialized 3D audio frame")
         
-        try:
-            # Load audio into pygame mixer
-            pygame.mixer.music.load(file_path)
-            
-            self.is_playing = True
-            self.current_position = 0
-            pygame.mixer.music.play()
-            
-            # Start a thread to monitor playback
-            self.playback_thread = threading.Thread(target=self.monitor_playback)
-            self.playback_thread.daemon = True
-            self.playback_thread.start()
-            
-        except Exception as e:
-            print(f"Failed to start audio playback: {e}")
-    
-    def stop_audio_playback(self):
-        """Stop audio playback"""
-        self.is_playing = False
-        pygame.mixer.music.stop()
-        self.current_position = 0
-    
-    def monitor_playback(self):
-        """Monitor audio playback and restart if needed"""
-        while self.is_playing and pygame.mixer.music.get_busy():
-            time.sleep(0.1)
-        
-        # If we've reached the end of the audio, restart playback (loop)
-        if self.is_playing:
-            self.start_audio_playback(self.parent.playlist[self.parent.current_song_index])
-    
-    def create_reverb_wave(self):
-        """Create a new reverb wave"""
-        self.reverb_waves.append({
-            "x": self.source_x,
-            "y": self.source_y,
-            "radius": 0,
-            "alpha": 1.0
-        })
-    
-    def update_reverb_waves(self):
-        """Update reverb wave visualization"""
-        for wave in self.reverb_waves.copy():
-            wave["radius"] += self.wave_speed
-            wave["alpha"] = 1.0 - (wave["radius"] / self.wave_max_radius)
-            if wave["radius"] > self.wave_max_radius:
-                self.reverb_waves.remove(wave)
-    
-    def draw(self):
-        """Draw the 3D audio visualization"""
-        self.canvas.delete("all")
-        
-        # Draw Room
-        center_x, center_y = self.world_to_canvas(0, 0)
+    def draw_room(self):
+        """绘制房间（大圆）"""
         self.canvas.create_oval(
-            center_x - self.room_radius, center_y - self.room_radius,
-            center_x + self.room_radius, center_y + self.room_radius,
-            outline="#444444", width=2
+            self.center_x - self.radius, self.center_y - self.radius,
+            self.center_x + self.radius, self.center_y + self.radius,
+            outline="#404040", width=2, tag="room"
         )
         
-        # Draw Reverb Waves
-        for wave in self.reverb_waves:
-            x, y = self.world_to_canvas(wave["x"], wave["y"])
-            color = f"#00ffff"  # Cyan color for waves
-            self.canvas.create_oval(
-                x - wave["radius"], y - wave["radius"],
-                x + wave["radius"], y + wave["radius"],
-                outline=color, width=1, stipple="gray50"
-            )
-        
-        # Draw Listener
+    def draw_listener(self):
+        """绘制听众（中心点）"""
         self.canvas.create_oval(
-            center_x - self.listener_radius, center_y - self.listener_radius,
-            center_x + self.listener_radius, center_y + self.listener_radius,
-            fill="#ffffff", outline="#888888"
+            self.center_x - 5, self.center_y - 5,
+            self.center_x + 5, self.center_y + 5,
+            fill="#00ff00", outline="#008000", tag="listener"
         )
+        self.canvas.create_text(self.center_x, self.center_y - 20, 
+                               text="Listener", fill="#808080", font=("roboto", 10))
         
-        # Draw Sound Source
-        source_x, source_y = self.world_to_canvas(self.source_x, self.source_y)
+    def draw_source(self):
+        """绘制声源点"""
+        self.canvas.delete("source")
+        self.canvas.delete("source_text")
         self.canvas.create_oval(
-            source_x - self.source_radius, source_y - self.source_radius,
-            source_x + self.source_radius, source_y + self.source_radius,
-            fill="#ff0000", outline="#ffffff"
+            self.source_x - self.source_radius, self.source_y - self.source_radius,
+            self.source_x + self.source_radius, self.source_y + self.source_radius,
+            fill="#ff4080", outline="#ff0040", width=2, tag="source"
         )
+        self.canvas.create_text(self.source_x, self.source_y - 15, 
+                               text="Sound Source", fill="#ff80a0", font=("roboto", 10), tag="source_text")
         
-        # Draw DSP Info
-        info_text = f"Pan: {self.pan:.2f} | Volume: {self.volume:.2f} | Reverb: {self.reverb:.2f}"
-        self.canvas.create_text(
-            center_x, center_y + self.room_radius + 20,
-            text=info_text, fill="#ffffff", font=("Arial", 10)
-        )
-    
-    def update_loop(self):
-        """Main update loop"""
-        self.update_reverb_waves()
-        self.draw()
-        self.after(50, self.update_loop)
-    
-    def on_enter(self):
-        """Called when the frame is entered"""
-        # Stop pygame playback and start our own with DSP
-        if self.parent.is_playing and self.parent.playlist:
-            pygame.mixer.music.stop()
-            self.start_audio_playback(self.parent.playlist[self.parent.current_song_index])
-    
-    def on_leave(self):
-        """Called when the frame is left"""
-        # Stop our DSP playback and resume pygame playback
-        self.stop_audio_playback()
-        if self.parent.playlist:
-            pygame.mixer.music.load(self.parent.playlist[self.parent.current_song_index])
-            pygame.mixer.music.play(start=self.parent.get_song_position() * self.parent.song_length)
-            self.parent.is_playing = True
+    def on_source_click(self, event):
+        """点击声源点"""
+        self.canvas.tag_raise("source")
+        
+    def on_source_drag(self, event):
+        """拖拽声源点"""
+        # 计算到中心的距离
+        dx = event.x - self.center_x
+        dy = event.y - self.center_y
+        distance = math.hypot(dx, dy)
+        
+        # 限制在房间内
+        if distance > self.radius:
+            # 计算角度
+            angle = math.atan2(dy, dx)
+            self.source_x = self.center_x + self.radius * math.cos(angle)
+            self.source_y = self.center_y + self.radius * math.sin(angle)
+        else:
+            self.source_x = event.x
+            self.source_y = event.y
+
+        # 减少波纹创建频率
+        if abs(self.source_x - self.last_drag_pos[0]) > 10 or abs(self.source_y - self.last_drag_pos[1]) > 10:
+            if len(self.waves) == 0 or (len(self.waves) > 0 and self.waves[-1]['radius'] > 10):
+                self.create_wave()
+            self.last_drag_pos = (self.source_x, self.source_y)
+            
+        # 只更新声源位置，不重绘整个画布
+        self.canvas.coords("source", self.source_x - self.source_radius, self.source_y - self.source_radius, self.source_x + self.source_radius, self.source_y + self.source_radius)
+        self.canvas.coords("source_text", self.source_x, self.source_y - 15)
+        
+        # 每50ms更新一次音频参数，避免频繁调用
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_audio_update > 50:
+            self.update_audio_params()
+            self.last_audio_update = current_time
+        
+    def reset_position(self):
+        """重置声源位置到中心"""
+        self.source_x = self.center_x
+        self.source_y = self.center_y
+        self.draw_source()
+        self.update_audio_params()
+        self.create_wave()
+        
+    def update_audio_params(self):
+        """更新音频参数：声像、音量、混响"""
+        # 计算声像 (Pan): 提升灵敏度
+        dx = self.source_x - self.center_x
+        self.pan = dx / (self.radius / 1.5)
+        self.pan = max(-1.0, min(1.0, self.pan))
+        
+        # 计算距离
+        self.distance = math.hypot(self.source_x - self.center_x, self.source_y - self.center_y)
+        
+        # 计算音量衰减：提升衰减效果
+        distance_norm = self.distance / (self.radius / 1.5)
+        distance_norm = min(1.0, distance_norm)
+        self.volume = self.max_volume - (self.max_volume - self.min_volume) * distance_norm
+        
+        # 计算混响：距离边缘越近混响越大
+        reverb_amount = (self.radius - self.distance) / self.radius
+        
+        # 更新UI显示
+        self.pan_label.configure(text=f"Pan: {self.pan:.2f}")
+        self.volume_label.configure(text=f"Volume: {int(self.volume * 100)}%")
+        self.reverb_label.configure(text=f"Reverb: {int(reverb_amount * 100)}%")
+        
+        # 应用音频效果
+        self.apply_audio_effects()
+        
+    def apply_audio_effects(self):
+        """应用音频效果到当前播放"""
+        if pygame.mixer.get_init() and self.parent.is_playing:
+            # 计算左右声道音量
+            left_volume = self.volume * max(0.0, min(1.0, (1.0 - self.pan) / 2 + 0.5))
+            right_volume = self.volume * max(0.0, min(1.0, (1.0 + self.pan) / 2 + 0.5))
+            
+            try:
+                # 使用parent的audio_channel来控制立体声平衡
+                if hasattr(self.parent, 'audio_channel'):
+                    self.parent.audio_channel.set_volume(left_volume, right_volume)
+                elif pygame.mixer.get_num_channels() > 0:
+                    # 回退到Channel 0
+                    channel = pygame.mixer.Channel(0)
+                    channel.set_volume(left_volume, right_volume)
+                else:
+                    # 如果没有通道，直接设置音乐音量
+                    pygame.mixer.music.set_volume(self.volume)
+                    
+            except Exception as e:
+                logging.debug(f"Failed to set audio effects: {e}")
+                
+    def create_wave(self):
+        """创建波纹效果"""
+        wave_radius = self.source_radius
+        wave = {
+            'x': self.source_x,
+            'y': self.source_y,
+            'radius': wave_radius,
+            'max_radius': 50,
+            'alpha': 1.0,
+            'decay': 0.02
+        }
+        self.waves.append(wave)
+        
+    def animate_waves(self):
+        """动画波纹效果"""
+        # 清除旧波纹
+        self.canvas.delete("wave")
+        
+        # 更新波纹
+        new_waves = []
+        for wave in self.waves:
+            wave['radius'] += 2
+            wave['alpha'] -= wave['decay']
+            
+            if wave['alpha'] > 0 and wave['radius'] < wave['max_radius']:
+                # 计算透明度对应的颜色
+                color = f"#{int(0xff * wave['alpha']):02x}{int(0x40 * wave['alpha']):02x}{int(0x80 * wave['alpha']):02x}"
+                self.canvas.create_oval(
+                    wave['x'] - wave['radius'], wave['y'] - wave['radius'],
+                    wave['x'] + wave['radius'], wave['y'] + wave['radius'],
+                    outline=color, width=2, tag="wave"
+                )
+                new_waves.append(wave)
+                
+        self.waves = new_waves
+        
+        # 继续动画
+        self.after(30, self.animate_waves)

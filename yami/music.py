@@ -49,6 +49,7 @@ class MusicPlayer(ctk.CTk):
         self.is_playing = False
         self.song_start_time = 0
         self.song_length = 0
+        self.is_3d_mode = False  # 3D音效模式
 
         self.loop = loop if loop is not None else asyncio.new_event_loop()
         self.downloader = None  # 延迟初始化
@@ -91,10 +92,9 @@ class MusicPlayer(ctk.CTk):
 
     def load_and_play_song(self, index):
         if self.is_playing:
-            if self.audio_stream is not None:
-                self.audio_stream.stop_stream()
-                self.audio_stream.close()
             pygame.mixer.music.stop()
+            # 停止所有通道
+            pygame.mixer.stop()
         
         self.current_song_index = index
         song_path = self.playlist[index]
@@ -107,11 +107,11 @@ class MusicPlayer(ctk.CTk):
             else:
                 self.song_length = 180  # 默认3分钟
             
-            # Load audio with pygame
-            pygame.mixer.music.load(song_path)
-            
-            # For real-time DSP, we need to read the audio data directly
-            # Note: This is a simplified approach. For better performance, use a dedicated audio library
+            # 使用Sound对象播放以支持Channel控制
+            self.current_sound = pygame.mixer.Sound(song_path)
+            # 使用Channel 0播放
+            self.audio_channel = pygame.mixer.Channel(0)
+            self.audio_channel.play(self.current_sound)
             self.is_playing = True
             self.song_start_time = time.time()
             
@@ -121,9 +121,6 @@ class MusicPlayer(ctk.CTk):
             # 加载歌词
             self.load_lyrics()
             self.current_lyric_index = -1
-            
-            # Start playback with pygame (we'll handle DSP separately)
-            pygame.mixer.music.play()
             
             logging.debug("playing %s", self.get_song_title())
         except Exception as e:
@@ -143,6 +140,11 @@ class MusicPlayer(ctk.CTk):
         
     def play_next_song(self, _event=None):
         logging.debug("playing next song due to button press / keybind")
+        if self.is_playing:
+            if hasattr(self, 'audio_channel'):
+                self.audio_channel.stop()
+            pygame.mixer.music.stop()
+        
         if self.current_song_index < len(self.playlist) - 1:
             self.load_and_play_song(self.current_song_index + 1)
         else:
@@ -154,6 +156,11 @@ class MusicPlayer(ctk.CTk):
 
     def play_previous(self, event=None):
         logging.debug("playing previous song due to button press / keybind")
+        if self.is_playing:
+            if hasattr(self, 'audio_channel'):
+                self.audio_channel.stop()
+            pygame.mixer.music.stop()
+        
         if self.current_song_index > 0:
             self.load_and_play_song(self.current_song_index - 1)
         else:
@@ -307,13 +314,6 @@ class MusicPlayer(ctk.CTk):
         """Initialize pygame mixer for audio playback"""
         pygame.mixer.init()
         logging.debug("initialized pygame mixer")
-        
-        # Initialize PyAudio for real-time DSP
-        import pyaudio
-        self.pyaudio = pyaudio.PyAudio()
-        self.audio_stream = None
-        self.audio_data = None
-        self.is_playing = False
 
     def setup_icons(self):
         self.play_icon = ctk.CTkImage(Image.open("yami/data/play_arrow.png"))
@@ -332,7 +332,6 @@ class MusicPlayer(ctk.CTk):
         self.cover_art_frame = CoverArtFrame(self)
         self.lyrics_frame = LyricsFrame(self)
         self.audio_3d_frame = Audio3DFrame(self)
-        self.is_audio_3d_active = False
 
     def setup_keybindings(self):
         """
@@ -355,30 +354,31 @@ class MusicPlayer(ctk.CTk):
         self.playlist_frame.pack(side=tk.RIGHT)
         self.cover_art_frame.pack(side=tk.LEFT, padx=10)
         self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-        # Audio3DFrame is initially hidden
+        # 3D音效界面默认隐藏
+        self.audio_3d_frame.pack_forget()
         logging.debug("widgets packed")
-    
-    def toggle_audio_3d(self):
-        """Toggle between 3D audio visualization and normal view"""
-        if self.is_audio_3d_active:
-            # Switch back to normal view
-            self.audio_3d_frame.on_leave()
-            self.audio_3d_frame.pack_forget()
-            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
-            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            self.is_audio_3d_active = False
-        else:
-            # Switch to 3D audio view
-            self.cover_art_frame.pack_forget()
-            self.lyrics_frame.pack_forget()
-            self.audio_3d_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
-            self.audio_3d_frame.on_enter()
-            self.is_audio_3d_active = True
 
     def update_loop(self):
         self.loop.call_soon(self.loop.stop)
         self.loop.run_forever()
         self.after(1000, self.update_loop)
+        
+    def toggle_3d_audio_mode(self):
+        """切换3D音效模式"""
+        self.is_3d_mode = not self.is_3d_mode
+        
+        if self.is_3d_mode:
+            # 隐藏封面和歌词界面，显示3D音效界面
+            self.cover_art_frame.pack_forget()
+            self.lyrics_frame.pack_forget()
+            self.audio_3d_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            self.topbar.audio_3d_btn.configure(text="返回界面")
+        else:
+            # 显示封面和歌词界面，隐藏3D音效界面
+            self.audio_3d_frame.pack_forget()
+            self.cover_art_frame.pack(side=tk.LEFT, padx=10)
+            self.lyrics_frame.pack(side=tk.LEFT, expand=True, fill="both", padx=10, pady=10)
+            self.topbar.audio_3d_btn.configure(text="3D 音效")
 
 
 if __name__ == "__main__":
